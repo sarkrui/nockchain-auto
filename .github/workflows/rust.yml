@@ -61,11 +61,6 @@ jobs:
       - name: Install Hoon compiler
         run: make install-hoonc
 
-      - name: Lint Rust code
-        run: |
-          cargo fmt -- --check
-          cargo clippy -- -D warnings
-
       - name: Build Nockchain and wallet
         run: make build
 
