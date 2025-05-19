@@ -26,16 +26,48 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-      - name: Install Rust toolchain
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl git
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install curl git
+
+      - name: Setup Rust
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           override: true
+          components: rustfmt, clippy
 
-      - name: Build workspace (release)
-        run: cargo build --release --workspace
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Hoon compiler
+        run: make install-hoonc
+
+      - name: Lint Rust code
+        run: |
+          cargo fmt -- --check
+          cargo clippy -- -D warnings
+
+      - name: Build Nockchain and wallet
+        run: make build
 
       - name: Package binaries
         run: |
