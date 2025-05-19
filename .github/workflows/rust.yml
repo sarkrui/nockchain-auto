@@ -1,0 +1,45 @@
+name: Build Release Binaries
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            suffix: linux-x86_64
+          - os: macos-latest
+            suffix: macos-arm64
+          - os: macos-13
+            suffix: macos-x86_64
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Build workspace (release)
+        run: cargo build --release --workspace
+
+      - name: Package binaries
+        run: |
+          mkdir -p artifacts
+          cp target/release/nockchain artifacts/nockchain-${{ matrix.suffix }}
+          cp target/release/nockchain-wallet artifacts/nockchain-wallet-${{ matrix.suffix }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: nockchain-binaries-${{ matrix.suffix }}
+          path: artifacts/
