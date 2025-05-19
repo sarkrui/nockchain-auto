@@ -1,7 +1,6 @@
 name: Build Release Binaries
 
 on:
-  # Manual trigger from the Actions tab
   workflow_dispatch:
 
   push:
@@ -45,7 +44,13 @@ jobs:
           cp target/release/nockchain-wallet artifacts/nockchain-wallet-${{ matrix.suffix }}
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: nockchain-binaries-${{ matrix.suffix }}
           path: artifacts/
+
+      - name: (Optional) Download artifacts in another job
+        uses: actions/download-artifact@v4
+        with:
+          name: nockchain-binaries-${{ matrix.suffix }}
+          path: artifacts-consumed/
