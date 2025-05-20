@@ -69,15 +69,25 @@ jobs:
       - name: Package binaries
         run: |
           mkdir -p artifacts
+          # First copy the binaries with platform suffix for individual artifacts
           cp target/release/nockchain artifacts/nockchain-${{ matrix.suffix }}
           cp target/release/nockchain-wallet artifacts/nockchain-wallet-${{ matrix.suffix }}
           cp target/release/equix-latency artifacts/equix-latency-${{ matrix.suffix }}
           cp target/release/hoonc artifacts/hoonc-${{ matrix.suffix }}
           cp target/release/nockchain-bitcoin-sync artifacts/nockchain-bitcoin-sync-${{ matrix.suffix }}
           
+          # Create a temp directory for zip contents with clean binary names
+          mkdir -p artifacts/zip-contents
+          cp target/release/nockchain artifacts/zip-contents/nockchain
+          cp target/release/nockchain-wallet artifacts/zip-contents/nockchain-wallet
+          cp target/release/equix-latency artifacts/zip-contents/equix-latency
+          cp target/release/hoonc artifacts/zip-contents/hoonc
+          cp target/release/nockchain-bitcoin-sync artifacts/zip-contents/nockchain-bitcoin-sync
+          
           # Create zip file for all binaries by architecture
-          cd artifacts
-          zip nockchain-all-${{ matrix.suffix }}.zip *-${{ matrix.suffix }}
+          cd artifacts/zip-contents
+          zip ../nockchain-all-${{ matrix.suffix }}.zip *
+          cd ../..
 
       - name: Upload individual build artifacts
         uses: actions/upload-artifact@v4
@@ -101,19 +111,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            all-artifacts/nockchain-binaries-linux-x86_64/nockchain-linux-x86_64
-            all-artifacts/nockchain-binaries-linux-x86_64/nockchain-wallet-linux-x86_64
-            all-artifacts/nockchain-binaries-linux-x86_64/equix-latency-linux-x86_64
-            all-artifacts/nockchain-binaries-linux-x86_64/hoonc-linux-x86_64
-            all-artifacts/nockchain-binaries-linux-x86_64/nockchain-bitcoin-sync-linux-x86_64
-            all-artifacts/nockchain-binaries-macos-arm64/nockchain-macos-arm64
-            all-artifacts/nockchain-binaries-macos-arm64/nockchain-wallet-macos-arm64
-            all-artifacts/nockchain-binaries-macos-arm64/equix-latency-macos-arm64
-            all-artifacts/nockchain-binaries-macos-arm64/hoonc-macos-arm64
-            all-artifacts/nockchain-binaries-macos-arm64/nockchain-bitcoin-sync-macos-arm64
-            all-artifacts/nockchain-binaries-macos-x86_64/nockchain-macos-x86_64
-            all-artifacts/nockchain-binaries-macos-x86_64/nockchain-wallet-macos-x86_64
-            all-artifacts/nockchain-binaries-macos-x86_64/equix-latency-macos-x86_64
-            all-artifacts/nockchain-binaries-macos-x86_64/hoonc-macos-x86_64
-            all-artifacts/nockchain-binaries-macos-x86_64/nockchain-bitcoin-sync-macos-x86_64
+            all-artifacts/nockchain-binaries-linux-x86_64/nockchain-all-linux-x86_64.zip
+            all-artifacts/nockchain-binaries-macos-arm64/nockchain-all-macos-arm64.zip
+            all-artifacts/nockchain-binaries-macos-x86_64/nockchain-all-macos-x86_64.zip
           generate_release_notes: true
