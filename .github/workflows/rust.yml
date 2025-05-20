@@ -106,17 +106,14 @@ jobs:
             all-artifacts/nockchain-binaries-linux-x86_64/equix-latency-linux-x86_64
             all-artifacts/nockchain-binaries-linux-x86_64/hoonc-linux-x86_64
             all-artifacts/nockchain-binaries-linux-x86_64/nockchain-bitcoin-sync-linux-x86_64
-            all-artifacts/nockchain-binaries-linux-x86_64/nockchain-all-linux-x86_64.zip
             all-artifacts/nockchain-binaries-macos-arm64/nockchain-macos-arm64
             all-artifacts/nockchain-binaries-macos-arm64/nockchain-wallet-macos-arm64
             all-artifacts/nockchain-binaries-macos-arm64/equix-latency-macos-arm64
             all-artifacts/nockchain-binaries-macos-arm64/hoonc-macos-arm64
             all-artifacts/nockchain-binaries-macos-arm64/nockchain-bitcoin-sync-macos-arm64
-            all-artifacts/nockchain-binaries-macos-arm64/nockchain-all-macos-arm64.zip
             all-artifacts/nockchain-binaries-macos-x86_64/nockchain-macos-x86_64
             all-artifacts/nockchain-binaries-macos-x86_64/nockchain-wallet-macos-x86_64
             all-artifacts/nockchain-binaries-macos-x86_64/equix-latency-macos-x86_64
             all-artifacts/nockchain-binaries-macos-x86_64/hoonc-macos-x86_64
             all-artifacts/nockchain-binaries-macos-x86_64/nockchain-bitcoin-sync-macos-x86_64
-            all-artifacts/nockchain-binaries-macos-x86_64/nockchain-all-macos-x86_64.zip
           generate_release_notes: true
