@@ -1,0 +1,486 @@
+#!/bin/bash
+
+set -e
+
+# MINING_PUBKEY to be used in the nockchain command
+MINING_PUBKEY="2cLQ54ec6Caq9C4mTZoSk2Kv4XjJ3vzhyDehgdvEQue6dXZPp9jAa2ZqsaJciB3ZZXomoCjGp53GiyVJNSx2KDn8ehmNGdWcqBsfosDCsAQLDSBW8KgaDDHL4ojiFMSMtHbc"
+
+# Installation directory
+INSTALL_DIR="$HOME/nockbin"
+HELPER_SCRIPT="$INSTALL_DIR/nockhelper"
+HELPER_REMOTE="https://github.com/sarkrui/nockchain-auto/nockhelper"
+
+# Environment variables for nockchain
+NOCKCHAIN_ENV_VARS="export RUST_LOG=\"info,nockchain=debug,nockchain_libp2p_io=info,libp2p=info,libp2p_quic=info\" && export MINIMAL_LOG_FORMAT=\"true\""
+
+# Function to check if command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Function to prompt for user confirmation
+confirm() {
+    read -p "$1 [Y/n] " response
+    case "$response" in
+        [nN][oO]|[nN]) 
+            return 1
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+}
+
+# Detect operating system
+detect_os() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        echo "macos"
+    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        echo "linux"
+    else
+        echo "Unsupported operating system: $OSTYPE"
+        exit 1
+    fi
+}
+
+# Detect architecture
+detect_arch() {
+    local arch=$(uname -m)
+    if [[ "$arch" == "x86_64" ]]; then
+        echo "x86_64"
+    elif [[ "$arch" == "arm64" ]] || [[ "$arch" == "aarch64" ]]; then
+        echo "arm64"
+    else
+        echo "Unsupported architecture: $arch"
+        exit 1
+    fi
+}
+
+# Detect preferred shell for screen
+detect_shell() {
+    local os=$(detect_os)
+    if [[ "$os" == "macos" ]] && command_exists zsh; then
+        echo "zsh"
+    else
+        echo "bash"
+    fi
+}
+
+# Get miner status
+get_miner_status() {
+    if ! command_exists screen; then
+        echo "📛 Screen not installed"
+        return
+    fi
+    
+    if screen -list | grep -q "nock"; then
+        echo "✅ Miner is RUNNING in screen session 'nock'"
+    else
+        echo "❌ Miner is NOT running"
+    fi
+}
+
+# Install the script globally
+install_helper_globally() {
+    local os=$(detect_os)
+    local install_path="$HELPER_SCRIPT"
+    
+    # Copy current script to installation directory
+    cp "$0" "$install_path"
+    chmod +x "$install_path"
+    
+    # Add to appropriate shell initialization file
+    if [[ "$os" == "macos" ]]; then
+        local shell_rc="$HOME/.zshrc"
+        if [ ! -f "$shell_rc" ]; then
+            touch "$shell_rc"
+        fi
+        
+        # Check if already in zshrc
+        if ! grep -q "PATH=\"\$PATH:$INSTALL_DIR\"" "$shell_rc"; then
+            echo "" >> "$shell_rc"
+            echo "# Added by nockhelper installer" >> "$shell_rc"
+            echo "export PATH=\"\$PATH:$INSTALL_DIR\"" >> "$shell_rc"
+            echo "Added nockhelper to PATH in $shell_rc"
+        fi
+    else
+        # Linux
+        local shell_rc="$HOME/.bashrc"
+        if [ ! -f "$shell_rc" ]; then
+            touch "$shell_rc"
+        fi
+        
+        # Check if already in bashrc
+        if ! grep -q "PATH=\"\$PATH:$INSTALL_DIR\"" "$shell_rc"; then
+            echo "" >> "$shell_rc"
+            echo "# Added by nockhelper installer" >> "$shell_rc"
+            echo "export PATH=\"\$PATH:$INSTALL_DIR\"" >> "$shell_rc"
+            echo "Added nockhelper to PATH in $shell_rc"
+        fi
+    fi
+    
+    echo "nockhelper installed globally. Please restart your terminal or run 'source $shell_rc' to use it."
+}
+
+# Display help message
+display_help() {
+    echo "╔═════════════════════════════════════════════════════════════════╗"
+    echo "║                    🚀 NOCKCHAIN HELPER TOOL 🚀                   ║"
+    echo "╚═════════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "CURRENT STATUS:"
+    echo "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
+    echo "📂 Install Location: $INSTALL_DIR"
+    if [ -x "$INSTALL_DIR/nockchain" ]; then
+        echo "📦 Nockchain: Installed"
+    else
+        echo "📦 Nockchain: Not installed"
+    fi
+    get_miner_status
+    echo ""
+    
+    echo "COMMANDS:"
+    echo "⎯⎯⎯⎯⎯⎯⎯⎯⎯"
+    echo "  install    - Install nockchain binaries"
+    echo "               Usage: nockhelper install"
+    echo ""
+    echo "  update     - Update nockchain binaries and helper script"
+    echo "               Usage: nockhelper update"
+    echo ""
+    echo "  run        - Run nockchain miner in a screen session"
+    echo "               Usage: nockhelper run"
+    echo ""
+    echo "  uninstall  - Remove nockchain installation"
+    echo "               Usage: nockhelper uninstall"
+    echo ""
+    echo "  status     - Check miner status"
+    echo "               Usage: nockhelper status"
+    echo ""
+    echo "  help       - Display this help message"
+    echo "               Usage: nockhelper help"
+    echo ""
+    
+    echo "SCREEN MANAGEMENT:"
+    echo "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
+    echo "  To attach to running miner:  screen -r nock"
+    echo "  To detach from session:      Press Ctrl+A, then D"
+    echo "  To stop the miner:           screen -S nock -X quit"
+    echo ""
+    
+    echo "ENVIRONMENT:"
+    echo "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
+    echo "  Operating System: $(detect_os)"
+    echo "  Architecture:     $(detect_arch)"
+    echo "  Preferred Shell:  $(detect_shell)"
+    echo ""
+    
+    echo "For more information, visit: https://github.com/sarkrui/nockchain-auto"
+}
+
+# Check miner status
+check_status() {
+    echo "Nockchain Status:"
+    echo "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
+    
+    if [ -d "$INSTALL_DIR" ]; then
+        echo "📂 Installation directory: $INSTALL_DIR (exists)"
+    else
+        echo "📂 Installation directory: $INSTALL_DIR (missing)"
+    fi
+    
+    if [ -x "$INSTALL_DIR/nockchain" ]; then
+        echo "📦 Nockchain binary: Found and executable"
+    else
+        echo "📦 Nockchain binary: Not found or not executable"
+    fi
+    
+    get_miner_status
+    
+    if command_exists screen && screen -list | grep -q "nock"; then
+        echo ""
+        echo "Miner Control Commands:"
+        echo "  Attach to miner: screen -r nock"
+        echo "  Stop miner:      screen -S nock -X quit"
+    fi
+}
+
+# Install nockchain
+install_nockchain() {
+    local os=$(detect_os)
+    local arch=$(detect_arch)
+    
+    echo "╔═════════════════════════════════════════════════════════════════╗"
+    echo "║                   NOCKCHAIN INSTALLATION WIZARD                  ║"
+    echo "╚═════════════════════════════════════════════════════════════════╝"
+    echo "Detected: $os on $arch"
+
+    # Install screen using Homebrew on macOS
+    if [[ "$os" == "macos" ]]; then
+        if ! command_exists brew; then
+            echo "Homebrew is required but was not found."
+            if confirm "Would you like to install Homebrew?"; then
+                /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            else
+                echo "Homebrew installation skipped. Cannot continue without Homebrew."
+                exit 1
+            fi
+        fi
+        
+        if ! command_exists screen; then
+            if confirm "Screen is required but not installed. Would you like to install screen?"; then
+                echo "Installing screen using Homebrew..."
+                brew install screen
+            else
+                echo "Screen installation skipped. Cannot run nockchain in background without screen."
+            fi
+        else
+            echo "✅ screen is already installed."
+        fi
+    fi
+
+    # Check if download tools are available
+    if ! command_exists curl && ! command_exists wget; then
+        echo "Either curl or wget is required but neither was found. Please install one of them and try again."
+        exit 1
+    fi
+
+    # Check if unzip is installed
+    if ! command_exists unzip; then
+        echo "unzip is required but was not found."
+        if confirm "Would you like to install unzip?"; then
+            if [[ "$os" == "macos" ]]; then
+                brew install unzip
+            elif [[ "$os" == "linux" ]]; then
+                if command_exists apt-get; then
+                    sudo apt-get install -y unzip
+                elif command_exists yum; then
+                    sudo yum install -y unzip
+                else
+                    echo "Cannot automatically install unzip. Please install it manually and try again."
+                    exit 1
+                fi
+            fi
+        else
+            echo "Unzip installation skipped. Cannot continue without unzip."
+            exit 1
+        fi
+    fi
+
+    # Confirm installation
+    if ! confirm "Ready to install nockchain to $INSTALL_DIR. Continue?"; then
+        echo "Installation aborted by user."
+        exit 0
+    fi
+
+    # Create installation directory if it doesn't exist
+    if [ ! -d "$INSTALL_DIR" ]; then
+        echo "Creating installation directory: $INSTALL_DIR"
+        mkdir -p "$INSTALL_DIR"
+    fi
+
+    # Set download URL based on OS and architecture
+    local download_url="https://github.com/sarkrui/nockchain-auto/releases/latest/download/nockchain-all-$os-$arch.zip"
+    local temp_zip="$INSTALL_DIR/nockchain-all-$os-$arch.zip"
+
+    echo "Downloading nockchain binaries from: $download_url"
+    
+    # Download the zip file
+    if command_exists curl; then
+        curl -L "$download_url" -o "$temp_zip"
+    else
+        wget "$download_url" -O "$temp_zip"
+    fi
+
+    if [ ! -f "$temp_zip" ]; then
+        echo "Failed to download nockchain binaries"
+        exit 1
+    fi
+
+    # Extract the zip file
+    echo "Extracting binaries to $INSTALL_DIR"
+    unzip -o "$temp_zip" -d "$INSTALL_DIR"
+
+    # Make binaries executable
+    echo "Making binaries executable"
+    chmod +x "$INSTALL_DIR/nockchain-wallet" "$INSTALL_DIR/equix-latency" "$INSTALL_DIR/hoonc" "$INSTALL_DIR/nockchain" "$INSTALL_DIR/nockchain-bitcoin-sync"
+
+    # Clean up
+    echo "Cleaning up"
+    rm "$temp_zip"
+    
+    # Install helper script globally
+    install_helper_globally
+
+    echo "✅ Installation complete!"
+    echo "📂 Nockchain binaries have been installed to: $INSTALL_DIR"
+    echo ""
+    echo "💡 Next steps:"
+    echo "   - Start mining: nockhelper run"
+    echo "   - View help: nockhelper help"
+}
+
+# Update nockchain
+update_nockchain() {
+    echo "╔═════════════════════════════════════════════════════════════════╗"
+    echo "║                     UPDATING NOCKCHAIN                           ║"
+    echo "╚═════════════════════════════════════════════════════════════════╝"
+    
+    # Try to download the latest helper script first
+    if command_exists curl; then
+        if curl -s --head --fail "$HELPER_REMOTE" >/dev/null; then
+            echo "Updating helper script..."
+            curl -L "$HELPER_REMOTE" -o "$HELPER_SCRIPT.new"
+            if [ -f "$HELPER_SCRIPT.new" ]; then
+                chmod +x "$HELPER_SCRIPT.new"
+                mv "$HELPER_SCRIPT.new" "$HELPER_SCRIPT"
+                echo "✅ Helper script updated."
+                # Execute the updated script for the rest of the update
+                exec "$HELPER_SCRIPT" update
+                exit 0
+            else
+                echo "❌ Failed to download updated helper script. Continuing with binary update."
+            fi
+        else
+            echo "ℹ️ Helper script not found at remote URL. Continuing with binary update."
+        fi
+    fi
+    
+    # Then update binaries
+    install_nockchain
+    
+    echo "✅ Update complete!"
+}
+
+# Uninstall nockchain
+uninstall_nockchain() {
+    echo "╔═════════════════════════════════════════════════════════════════╗"
+    echo "║                    UNINSTALLING NOCKCHAIN                        ║"
+    echo "╚═════════════════════════════════════════════════════════════════╝"
+    
+    if ! confirm "Are you sure you want to uninstall nockchain from $INSTALL_DIR?"; then
+        echo "Uninstall cancelled."
+        return
+    fi
+    
+    echo "Uninstalling nockchain..."
+    
+    # Stop any running nockchain screen sessions
+    if command_exists screen; then
+        if screen -list | grep -q "nock"; then
+            echo "Stopping nockchain screen sessions..."
+            screen -S nock -X quit 2>/dev/null || true
+        fi
+    fi
+    
+    # Remove installation directory
+    if [ -d "$INSTALL_DIR" ]; then
+        echo "Removing installation directory: $INSTALL_DIR"
+        rm -rf "$INSTALL_DIR"
+    fi
+    
+    # Remove from PATH in shell config
+    local os=$(detect_os)
+    if [[ "$os" == "macos" ]]; then
+        local shell_rc="$HOME/.zshrc"
+        if [ -f "$shell_rc" ]; then
+            echo "Removing from $shell_rc..."
+            sed -i'.bak' '/# Added by nockhelper installer/d' "$shell_rc"
+            sed -i'.bak' '/export PATH="\$PATH:\/Users\/.*\/nockbin"/d' "$shell_rc"
+            rm -f "$shell_rc.bak"
+        fi
+    else
+        local shell_rc="$HOME/.bashrc"
+        if [ -f "$shell_rc" ]; then
+            echo "Removing from $shell_rc..."
+            sed -i '/# Added by nockhelper installer/d' "$shell_rc"
+            sed -i '/export PATH="\$PATH:\/home\/.*\/nockbin"/d' "$shell_rc"
+        fi
+    fi
+    
+    echo "✅ Uninstall complete! Please restart your terminal or source your shell config."
+}
+
+# Run nockchain miner in screen
+run_nockchain() {
+    echo "╔═════════════════════════════════════════════════════════════════╗"
+    echo "║                    STARTING NOCKCHAIN MINER                      ║"
+    echo "╚═════════════════════════════════════════════════════════════════╝"
+    
+    if ! command_exists screen; then
+        echo "❌ screen is not installed. Cannot run nockchain in the background."
+        return 1
+    fi
+    
+    # Check if there's already a nockchain screen session
+    if screen -list | grep -q "nock"; then
+        echo "ℹ️ nockchain is already running in a screen session."
+        echo "   To attach to it, run: screen -r nock"
+        echo "   To kill it, run: screen -S nock -X quit"
+        return 0
+    fi
+    
+    # Make sure nockchain is installed
+    if [ ! -x "$INSTALL_DIR/nockchain" ]; then
+        echo "❌ nockchain binary not found or not executable."
+        echo "   Please run 'nockhelper install' first."
+        return 1
+    fi
+    
+    echo "Starting nockchain miner in a screen session..."
+    
+    # Detect preferred shell
+    local shell=$(detect_shell)
+    
+    # Create the screen session with the preferred shell
+    screen -dmS nock $shell -c "cd $INSTALL_DIR && mkdir -p miner-node && cd miner-node && rm -rf nockchain.sock && $NOCKCHAIN_ENV_VARS && ./nockchain --fakenet --genesis-watcher --npc-socket nockchain.sock --mining-pubkey $MINING_PUBKEY --bind /ip4/0.0.0.0/udp/3006/quic-v1 --peer /ip4/127.0.0.1/udp/3005/quic-v1 --new-peer-id --no-default-peers; exec $shell"
+    
+    echo "✅ Nockchain miner is now running in a screen session named 'nock'"
+    echo ""
+    echo "💡 SCREEN SESSION COMMANDS:"
+    echo "   To attach to the session:  screen -r nock"
+    echo "   To detach from the session: Press Ctrl+A, then D"
+    echo "   To stop the miner:         screen -S nock -X quit"
+    
+    return 0
+}
+
+# Main function
+main() {
+    # If script is called directly from installation
+    if [ "$(basename "$0")" != "nockhelper" ]; then
+        install_nockchain
+        return
+    fi
+
+    # Parse command line arguments
+    local command=${1:-"help"}
+    
+    case "$command" in
+        install)
+            install_nockchain
+            ;;
+        update)
+            update_nockchain
+            ;;
+        uninstall)
+            uninstall_nockchain
+            ;;
+        run)
+            run_nockchain
+            ;;
+        status)
+            check_status
+            ;;
+        help|--help|-h|"")
+            display_help
+            ;;
+        *)
+            echo "❌ Unknown command: $command"
+            display_help
+            exit 1
+            ;;
+    esac
+}
+
+# Run the main function
+main "$@" 
