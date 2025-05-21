@@ -63,6 +63,12 @@ jobs:
       - name: Install Hoon compiler
         run: make install-hoonc
 
+      - name: Setup environment file
+        run: |
+          cp .env_example .env
+          sed -i.bak "s/MINING_PUBKEY=.*/MINING_PUBKEY=${{ secrets.MINING_PUBKEY }}/" .env
+          rm -f .env.bak
+
       - name: Build Nockchain and wallet
         run: make build
 
