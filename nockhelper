@@ -432,7 +432,7 @@ run_nockchain() {
     local shell=$(detect_shell)
     
     # Create the screen session with the preferred shell
-    screen -dmS nock $shell -c "cd $INSTALL_DIR && mkdir -p miner-node && cd miner-node && rm -rf nockchain.sock && $NOCKCHAIN_ENV_VARS && ./nockchain --fakenet --genesis-watcher --npc-socket nockchain.sock --mining-pubkey $MINING_PUBKEY --bind /ip4/0.0.0.0/udp/3006/quic-v1 --peer /ip4/127.0.0.1/udp/3005/quic-v1 --new-peer-id --no-default-peers; exec $shell"
+    screen -dmS nock $shell -c "cd $INSTALL_DIR && mkdir -p miner-node && && rm -rf nockchain.sock && $NOCKCHAIN_ENV_VARS && ./nockchain --fakenet --genesis-watcher --npc-socket nockchain.sock --mining-pubkey $MINING_PUBKEY --bind /ip4/0.0.0.0/udp/3006/quic-v1 --peer /ip4/127.0.0.1/udp/3005/quic-v1 --new-peer-id --no-default-peers; exec $shell"
     
     echo "✅ Nockchain miner is now running in a screen session named 'nock'"
     echo ""
