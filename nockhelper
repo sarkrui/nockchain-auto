@@ -8,7 +8,7 @@ MINING_PUBKEY="2cLQ54ec6Caq9C4mTZoSk2Kv4XjJ3vzhyDehgdvEQue6dXZPp9jAa2ZqsaJciB3ZZ
 # Installation directory
 INSTALL_DIR="$HOME/nockbin"
 HELPER_SCRIPT="$INSTALL_DIR/nockhelper"
-HELPER_REMOTE="https://github.com/sarkrui/nockchain-auto/nockhelper"
+HELPER_REMOTE="https://raw.githubusercontent.com/sarkrui/nockchain-auto/refs/heads/master/nockhelper"
 
 # Environment variables for nockchain
 NOCKCHAIN_ENV_VARS="export RUST_LOG=\"info,nockchain=debug,nockchain_libp2p_io=info,libp2p=info,libp2p_quic=info\" && export MINIMAL_LOG_FORMAT=\"true\""
