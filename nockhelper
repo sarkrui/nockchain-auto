@@ -85,9 +85,46 @@ install_helper_globally() {
     local os=$(detect_os)
     local install_path="$HELPER_SCRIPT"
     
-    # Copy current script to installation directory
-    cp "$0" "$install_path"
-    chmod +x "$install_path"
+    # First try to download the latest helper script from remote
+    if command_exists curl; then
+        echo "Downloading latest helper script from remote..."
+        if curl -s --head --fail "$HELPER_REMOTE" >/dev/null; then
+            curl -L "$HELPER_REMOTE" -o "$install_path"
+            if [ -f "$install_path" ]; then
+                chmod +x "$install_path"
+                echo "✅ Helper script downloaded and installed from remote."
+            else
+                echo "❌ Failed to download helper script from remote. Using local copy."
+                cp "$0" "$install_path"
+                chmod +x "$install_path"
+            fi
+        else
+            echo "ℹ️ Helper script not found at remote URL. Using local copy."
+            cp "$0" "$install_path"
+            chmod +x "$install_path"
+        fi
+    elif command_exists wget; then
+        echo "Downloading latest helper script from remote..."
+        if wget --spider "$HELPER_REMOTE" 2>/dev/null; then
+            wget -q "$HELPER_REMOTE" -O "$install_path"
+            if [ -f "$install_path" ]; then
+                chmod +x "$install_path"
+                echo "✅ Helper script downloaded and installed from remote."
+            else
+                echo "❌ Failed to download helper script from remote. Using local copy."
+                cp "$0" "$install_path"
+                chmod +x "$install_path"
+            fi
+        else
+            echo "ℹ️ Helper script not found at remote URL. Using local copy."
+            cp "$0" "$install_path"
+            chmod +x "$install_path"
+        fi
+    else
+        echo "Neither curl nor wget found. Using local copy."
+        cp "$0" "$install_path"
+        chmod +x "$install_path"
+    fi
     
     # Add to appropriate shell initialization file
     if [[ "$os" == "macos" ]]; then
@@ -432,7 +469,7 @@ run_nockchain() {
     local shell=$(detect_shell)
     
     # Create the screen session with the preferred shell
-    screen -dmS nock $shell -c "cd $INSTALL_DIR && mkdir -p miner-node && && rm -rf nockchain.sock && $NOCKCHAIN_ENV_VARS && ./nockchain --fakenet --genesis-watcher --npc-socket nockchain.sock --mining-pubkey $MINING_PUBKEY --bind /ip4/0.0.0.0/udp/3006/quic-v1 --peer /ip4/127.0.0.1/udp/3005/quic-v1 --new-peer-id --no-default-peers; exec $shell"
+    screen -dmS nock $shell -c "cd $INSTALL_DIR && mkdir -p miner-node && rm -rf nockchain.sock && $NOCKCHAIN_ENV_VARS && ./nockchain --fakenet --genesis-watcher --npc-socket nockchain.sock --mining-pubkey $MINING_PUBKEY --bind /ip4/0.0.0.0/udp/3006/quic-v1 --peer /ip4/127.0.0.1/udp/3005/quic-v1 --new-peer-id --no-default-peers; exec $shell"
     
     echo "✅ Nockchain miner is now running in a screen session named 'nock'"
     echo ""
