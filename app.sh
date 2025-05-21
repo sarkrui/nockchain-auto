@@ -3,10 +3,10 @@
 set -e
 
 # MINING_PUBKEY to be used in the nockchain command
-MINING_PUBKEY="your-mining-pubkey-here"
+MINING_PUBKEY="2cLQ54ec6Caq9C4mTZoSk2Kv4XjJ3vzhyDehgdvEQue6dXZPp9jAa2ZqsaJciB3ZZXomoCjGp53GiyVJNSx2KDn8ehmNGdWcqBsfosDCsAQLDSBW8KgaDDHL4ojiFMSMtHbc"
 
 # Installation directory
-INSTALL_DIR="$HOME/Projects/nockchain"
+INSTALL_DIR="$HOME/nockbin"
 
 # Function to check if command exists
 command_exists() {
@@ -47,6 +47,22 @@ main() {
     OS=$(detect_os)
     ARCH=$(detect_arch)
     echo "Detected: $OS on $ARCH"
+
+    # Install screen using Homebrew on macOS
+    if [[ "$OS" == "macos" ]]; then
+        if ! command_exists brew; then
+            echo "Homebrew is required but was not found. Please install it and try again."
+            echo "You can install Homebrew by running: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+            exit 1
+        fi
+        
+        if ! command_exists screen; then
+            echo "Installing screen using Homebrew..."
+            brew install screen
+        else
+            echo "screen is already installed."
+        fi
+    fi
 
     # Check if download tools are available
     if ! command_exists curl && ! command_exists wget; then
@@ -100,8 +116,23 @@ main() {
     echo ""
     echo "Nockchain binaries have been installed to: $INSTALL_DIR"
     echo ""
-    echo "To start nockchain, run:"
-    echo "$INSTALL_DIR/nockchain --mainnet --genesis-watcher --npc-socket nockchain.sock --mining-pubkey $MINING_PUBKEY --bind /ip4/0.0.0.0/udp/3006/quic-v1 --peer /ip4/127.0.0.1/udp/3005/quic-v1 --new-peer-id --no-default-peers"
+    
+    # Start nockchain in a screen session
+    if command_exists screen; then
+        echo "Starting nockchain miner in a screen session..."
+        
+        # Create the screen session, run commands, and detach
+        screen -dmS nock bash -c "cd $INSTALL_DIR && mkdir -p miner-node && cd miner-node && rm -f nockchain.sock && $INSTALL_DIR/nockchain -- --fakenet --genesis-watcher --npc-socket nockchain.sock --mining-pubkey $MINING_PUBKEY --bind /ip4/0.0.0.0/udp/3006/quic-v1 --peer /ip4/127.0.0.1/udp/3005/quic-v1 --new-peer-id --no-default-peers; exec bash"
+        
+        echo "Nockchain miner is now running in a screen session named 'nock'"
+        echo "To attach to the session, run: screen -r nock"
+        echo "To detach from the session, press: Ctrl+A, then D"
+    else
+        echo "screen is not installed. Cannot start nockchain in the background."
+        echo "To start nockchain manually, run:"
+        echo "cd $INSTALL_DIR && mkdir -p miner-node && cd miner-node && rm -f nockchain.sock && $INSTALL_DIR/nockchain -- --fakenet --genesis-watcher --npc-socket nockchain.sock --mining-pubkey $MINING_PUBKEY --bind /ip4/0.0.0.0/udp/3006/quic-v1 --peer /ip4/127.0.0.1/udp/3005/quic-v1 --new-peer-id --no-default-peers"
+    fi
+    
     echo ""
     echo "Note: Please update the MINING_PUBKEY in this script or replace it in the command above with your actual mining public key."
 }
