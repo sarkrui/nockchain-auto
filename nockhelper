@@ -6,7 +6,7 @@ set -e
 MINING_PUBKEY="2cLQ54ec6Caq9C4mTZoSk2Kv4XjJ3vzhyDehgdvEQue6dXZPp9jAa2ZqsaJciB3ZZXomoCjGp53GiyVJNSx2KDn8ehmNGdWcqBsfosDCsAQLDSBW8KgaDDHL4ojiFMSMtHbc"
 
 # Nockhelper version
-NOCKHELPER_VERSION="1.0.0"
+NOCKHELPER_VERSION="1.0.1"
 
 # Installation directory
 INSTALL_DIR="$HOME/nockbin"
@@ -232,10 +232,14 @@ get_miner_status() {
         return
     fi
     
-    if screen -list | grep -q "nock"; then
-        echo "✅ Miner is RUNNING in screen session 'nock'"
+    # Check for nock sessions
+    local sessions=$(screen -list | grep "nock-" | wc -l)
+    
+    if [ "$sessions" -gt 0 ]; then
+        echo "✅ $sessions miner instance(s) RUNNING"
+        screen -list | grep "nock-" | sed 's/^/     /'
     else
-        echo "❌ Miner is NOT running"
+        echo "❌ No miners running"
     fi
 }
 
@@ -501,8 +505,9 @@ display_help() {
     echo "  check      - Check for nockchain updates"
     echo "               Usage: nockhelper check"
     echo ""
-    echo "  run        - Run nockchain miner in a screen session"
-    echo "               Usage: nockhelper run"
+    echo "  run        - Run nockchain miner in screen session(s)"
+    echo "               Usage: nockhelper run [num]"
+    echo "               [num]: Optional number of miner instances to run (default: 1)"
     echo ""
     echo "  uninstall  - Remove nockchain installation"
     echo "               Usage: nockhelper uninstall"
@@ -516,9 +521,10 @@ display_help() {
     
     echo "SCREEN MANAGEMENT:"
     echo "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
-    echo "  To attach to running miner:  screen -r nock"
-    echo "  To detach from session:      Press Ctrl+A, then D"
-    echo "  To stop the miner:           screen -S nock -X quit"
+    echo "  To list all sessions:     screen -list"
+    echo "  To attach to a session:   screen -r [session-id]"
+    echo "  To detach from a session: Press Ctrl+A, then D"
+    echo "  To stop a miner:          screen -S [session-id] -X quit"
     echo ""
     
     echo "ENVIRONMENT:"
@@ -557,11 +563,13 @@ check_status() {
     
     get_miner_status
     
-    if command_exists screen && screen -list | grep -q "nock"; then
+    if command_exists screen && screen -list | grep -q "nock-"; then
         echo ""
         echo "Miner Control Commands:"
-        echo "  Attach to miner: screen -r nock"
-        echo "  Stop miner:      screen -S nock -X quit"
+        echo "  List all miners:   screen -list | grep nock-"
+        echo "  Attach to miner:   screen -r [session-id]"
+        echo "  Stop a miner:      screen -S [session-id] -X quit"
+        echo "  Stop all miners:   for s in \$(screen -list | grep nock- | awk '{print \$1}'); do screen -S \$s -X quit; done"
     fi
 }
 
@@ -869,15 +877,38 @@ run_nockchain() {
     
     if ! command_exists screen; then
         echo "❌ screen is not installed. Cannot run nockchain in the background."
-        return 1
-    fi
-    
-    # Check if there's already a nockchain screen session
-    if screen -list | grep -q "nock"; then
-        echo "ℹ️ nockchain is already running in a screen session."
-        echo "   To attach to it, run: screen -r nock"
-        echo "   To kill it, run: screen -S nock -X quit"
-        return 0
+        # Install screen for Linux
+        local os=$(detect_os)
+        if [[ "$os" == "linux" ]]; then
+            echo "Attempting to install screen on Linux..."
+            if command_exists apt-get; then
+                if confirm "Would you like to install screen using apt-get?"; then
+                    sudo apt-get update && sudo apt-get install -y screen
+                else
+                    echo "Screen installation cancelled. Exiting."
+                    return 1
+                fi
+            elif command_exists yum; then
+                if confirm "Would you like to install screen using yum?"; then
+                    sudo yum install -y screen
+                else
+                    echo "Screen installation cancelled. Exiting."
+                    return 1
+                fi
+            else
+                echo "Unable to detect package manager. Please install screen manually."
+                return 1
+            fi
+            
+            if ! command_exists screen; then
+                echo "Failed to install screen. Please install it manually."
+                return 1
+            else
+                echo "✅ screen installed successfully."
+            fi
+        else
+            return 1
+        fi
     fi
     
     # Make sure nockchain is installed
@@ -887,20 +918,58 @@ run_nockchain() {
         return 1
     fi
     
-    echo "Starting nockchain miner in a screen session..."
+    # Get number of instances from command line argument (default: 1)
+    local num_instances=${2:-1}
+    
+    # Validate num_instances is a positive integer
+    if ! [[ "$num_instances" =~ ^[0-9]+$ ]] || [ "$num_instances" -lt 1 ]; then
+        echo "❌ Invalid number of instances: $num_instances"
+        echo "   Please provide a positive integer."
+        return 1
+    fi
+    
+    echo "Starting $num_instances nockchain miner instance(s) in screen session(s)..."
     
     # Detect preferred shell
     local shell=$(detect_shell)
     
-    # Create the screen session with the preferred shell
-    screen -dmS nock $shell -c "cd $INSTALL_DIR && rm -rf ./.data.nockchain .socket/nockchain_npc.sock && ./nockchain --mining-pubkey $MINING_PUBKEY --mine --peer /ip4/95.216.102.60/udp/3006/quic-v1 --peer /ip4/65.108.123.225/udp/3006/quic-v1 --peer /ip4/65.109.156.108/udp/3006/quic-v1 --peer /ip4/65.21.67.175/udp/3006/quic-v1 --peer /ip4/65.109.156.172/udp/3006/quic-v1 --peer /ip4/34.174.22.166/udp/3006/quic-v1 --peer /ip4/34.95.155.151/udp/30000/quic-v1 --peer /ip4/34.18.98.38/udp/30000/quic-v1; exec $shell"
+    # Create screen sessions
+    for ((i=1; i<=$num_instances; i++)); do
+        # Create session ID
+        local session_id="nock-$i"
+        
+        # Check if session already exists
+        if screen -list | grep -q "$session_id"; then
+            echo "Session $session_id already exists. Resuming..."
+            screen -R -d "$session_id"
+        else
+            # Create data directory for this instance
+            mkdir -p "$INSTALL_DIR/data-$session_id/socket"
+            
+            # Remove any existing data for this session
+            rm -rf "$INSTALL_DIR/data-$session_id/.data.nockchain" "$INSTALL_DIR/data-$session_id/socket/nockchain_npc.sock"
+            
+            # Create the screen session with the preferred shell
+            screen -dmS "$session_id" $shell -c "cd $INSTALL_DIR && mkdir -p data-$session_id/socket && cd data-$session_id && rm -rf ./.data.nockchain socket/nockchain_npc.sock && $INSTALL_DIR/nockchain --mining-pubkey $MINING_PUBKEY --mine --peer /ip4/95.216.102.60/udp/3006/quic-v1 --peer /ip4/65.108.123.225/udp/3006/quic-v1 --peer /ip4/65.109.156.108/udp/3006/quic-v1 --peer /ip4/65.21.67.175/udp/3006/quic-v1 --peer /ip4/65.109.156.172/udp/3006/quic-v1 --peer /ip4/34.174.22.166/udp/3006/quic-v1 --peer /ip4/34.95.155.151/udp/30000/quic-v1 --peer /ip4/34.18.98.38/udp/30000/quic-v1; exec $shell"
+            
+            echo "✅ Started nockchain miner in screen session: $session_id"
+            
+            # Sleep for 1 second between starting sessions
+            if [ "$i" -lt "$num_instances" ]; then
+                sleep 1
+            fi
+        fi
+    done
     
-    echo "✅ Nockchain miner is now running in a screen session named 'nock'"
     echo ""
     echo "💡 SCREEN SESSION COMMANDS:"
-    echo "   To attach to the session:  screen -r nock"
-    echo "   To detach from the session: Press Ctrl+A, then D"
-    echo "   To stop the miner:         screen -S nock -X quit"
+    echo "   To list all sessions:      screen -list"
+    echo "   To attach to a session:    screen -r [session-id]"
+    echo "   To detach from a session:  Press Ctrl+A, then D"
+    echo "   To stop a miner:           screen -S [session-id] -X quit"
+    echo ""
+    echo "💡 CURRENT SESSIONS:"
+    screen -list | grep "nock-"
     
     return 0
 }
@@ -939,7 +1008,7 @@ main() {
             uninstall_nockchain
             ;;
         run)
-            run_nockchain
+            run_nockchain "$@"
             ;;
         status)
             check_status
