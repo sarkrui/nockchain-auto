@@ -147,6 +147,5 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            all-artifacts/nockchain-binaries-linux-x86_64/nockchain-all-linux-x86_64.zip
-            all-artifacts/nockchain-binaries-macos-arm64/nockchain-all-macos-arm64.zip
+            all-artifacts/nockchain-zip-*/nockchain-all-*.zip
           generate_release_notes: true
