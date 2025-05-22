@@ -494,7 +494,6 @@ check_for_updates() {
 
 # Display help message
 display_help() {
-    clear
     echo "╔═════════════════════════════════════════════════════════════════╗"
     echo "║                      NOCKCHAIN HELPER TOOL                      ║"
     echo "╚═════════════════════════════════════════════════════════════════╝"
@@ -502,29 +501,19 @@ display_help() {
     echo "CURRENT STATUS:"
     echo "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
     echo "📂 Install Location: $INSTALL_DIR"
-    echo "🛠️ Nockhelper: v$(get_installed_nockhelper_version)"
+    echo "🛠️ Nockhelper: $(get_installed_nockhelper_version)"
     
-    check_for_nockhelper_updates >/dev/null
-    helper_update_status=$?
-    if [ $helper_update_status -eq 0 ]; then
-        echo "🔄 Nockhelper Update Status: Update available!"
-    elif [ $helper_update_status -eq 3 ]; then
-        echo "🔄 Nockhelper Update Status: Up to date"
-    fi
+    # Skip update check when displaying help to avoid GitHub API rate limits
+    echo "🔄 Nockhelper Update Status: Use 'nockhelper check' to check for updates"
     
     if [ -x "$INSTALL_DIR/nockchain" ]; then
         echo "📦 Nockchain: Installed ($(get_installed_nockchain_version))"
-        check_for_nockchain_updates >/dev/null
-        update_status=$?
-        if [ $update_status -eq 0 ]; then
-            echo "🔄 Nockchain Update Status: Update available!"
-        elif [ $update_status -eq 3 ]; then
-            echo "🔄 Nockchain Update Status: Up to date"
-        fi
+        echo "🔄 Nockchain Update Status: Use 'nockhelper check' to check for updates"
     else
         echo "📦 Nockchain: Not installed"
     fi
     get_miner_status
+    echo ""
     echo ""
     
     echo "COMMANDS:"
@@ -1069,7 +1058,7 @@ main() {
     fi
 
     # Parse command line arguments
-    local command=${1:-"help"}
+    local command=${1:-""}
     local arg2=${2:-""}
     
     case "$command" in
@@ -1106,7 +1095,11 @@ main() {
         status)
             check_status
             ;;
-        help|--help|-h|"")
+        help|--help|-h)
+            display_help
+            ;;
+        "")
+            # No command provided, show help
             display_help
             ;;
         *)
