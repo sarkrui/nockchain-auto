@@ -5,6 +5,9 @@ set -e
 # MINING_PUBKEY to be used in the nockchain command
 MINING_PUBKEY="2cLQ54ec6Caq9C4mTZoSk2Kv4XjJ3vzhyDehgdvEQue6dXZPp9jAa2ZqsaJciB3ZZXomoCjGp53GiyVJNSx2KDn8ehmNGdWcqBsfosDCsAQLDSBW8KgaDDHL4ojiFMSMtHbc"
 
+# Nockhelper version
+NOCKHELPER_VERSION="1.0.0"
+
 # Installation directory
 INSTALL_DIR="$HOME/nockbin"
 HELPER_SCRIPT="$INSTALL_DIR/nockhelper"
@@ -316,7 +319,7 @@ install_helper_globally() {
 }
 
 # Function to get the installed nockchain version
-get_installed_version() {
+get_installed_nockchain_version() {
     if [ ! -x "$INSTALL_DIR/nockchain" ]; then
         echo "not_installed"
         return
@@ -340,14 +343,38 @@ get_installed_version() {
     echo "$version"
 }
 
+# Function to get the installed nockhelper version
+get_installed_nockhelper_version() {
+    # Return the version defined at the top of the script
+    echo "$NOCKHELPER_VERSION"
+}
+
+# Function to get the latest nockhelper version from GitHub
+get_latest_nockhelper_version() {
+    local repo="sarkrui/nockchain-auto"
+    local tag=""
+    
+    if command_exists curl; then
+        tag=$(curl -s "https://api.github.com/repos/$repo/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    elif command_exists wget; then
+        tag=$(wget -qO- "https://api.github.com/repos/$repo/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    fi
+    
+    if [ -z "$tag" ]; then
+        echo "unknown"
+    else
+        echo "$tag"
+    fi
+}
+
 # Function to compare versions
 version_gt() {
     test "$(printf '%s\n' "$1" "$2" | sort -V | head -n 1)" != "$1"
 }
 
-# Function to check for updates
-check_for_updates() {
-    local installed_version=$(get_installed_version)
+# Function to check for nockchain updates
+check_for_nockchain_updates() {
+    local installed_version=$(get_installed_nockchain_version)
     local latest_version=$(get_latest_release_tag)
     
     if [ "$installed_version" = "not_installed" ]; then
@@ -355,12 +382,13 @@ check_for_updates() {
         return 1
     fi
     
-    echo "Installed version: $installed_version"
-    echo "Latest version:    $latest_version"
+    echo "Nockchain:"
+    echo "  Installed version: $installed_version"
+    echo "  Latest version:    $latest_version"
     
     # If either version is unknown, we can't compare
     if [[ "$installed_version" == *"unknown"* ]] || [[ "$latest_version" == "unknown" ]]; then
-        echo "ℹ️ Cannot determine if an update is needed."
+        echo "ℹ️ Cannot determine if a nockchain update is needed."
         return 2
     fi
     
@@ -369,12 +397,53 @@ check_for_updates() {
     latest_version=${latest_version#v}
     
     if version_gt "$latest_version" "$installed_version"; then
-        echo "✅ Update available! Version $latest_version is newer than your installed version $installed_version."
+        echo "✅ Nockchain update available! Version $latest_version is newer than your installed version $installed_version."
         return 0
     else
-        echo "✅ You have the latest version ($installed_version)."
+        echo "✅ You have the latest nockchain version ($installed_version)."
         return 3
     fi
+}
+
+# Function to check for nockhelper updates
+check_for_nockhelper_updates() {
+    local installed_version=$(get_installed_nockhelper_version)
+    local latest_version=$(get_latest_nockhelper_version)
+    
+    echo "Nockhelper:"
+    echo "  Installed version: $installed_version"
+    echo "  Latest version:    $latest_version"
+    
+    # If either version is unknown, we can't compare
+    if [[ "$installed_version" == *"unknown"* ]] || [[ "$latest_version" == "unknown" ]]; then
+        echo "ℹ️ Cannot determine if a nockhelper update is needed."
+        return 2
+    fi
+    
+    # Remove 'v' prefix if present
+    installed_version=${installed_version#v}
+    latest_version=${latest_version#v}
+    
+    if version_gt "$latest_version" "$installed_version"; then
+        echo "✅ Nockhelper update available! Version $latest_version is newer than your installed version $installed_version."
+        return 0
+    else
+        echo "✅ You have the latest nockhelper version ($installed_version)."
+        return 3
+    fi
+}
+
+# Function to check for all updates
+check_for_updates() {
+    echo "╔═════════════════════════════════════════════════════════════════╗"
+    echo "║                     CHECKING FOR UPDATES                        ║"
+    echo "╚═════════════════════════════════════════════════════════════════╝"
+    
+    check_for_nockchain_updates
+    echo ""
+    check_for_nockhelper_updates
+    
+    return 0
 }
 
 # Display help message
@@ -387,14 +456,24 @@ display_help() {
     echo "CURRENT STATUS:"
     echo "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
     echo "📂 Install Location: $INSTALL_DIR"
+    echo "🛠️ Nockhelper: v$(get_installed_nockhelper_version)"
+    
+    check_for_nockhelper_updates >/dev/null
+    helper_update_status=$?
+    if [ $helper_update_status -eq 0 ]; then
+        echo "🔄 Nockhelper Update Status: Update available!"
+    elif [ $helper_update_status -eq 3 ]; then
+        echo "🔄 Nockhelper Update Status: Up to date"
+    fi
+    
     if [ -x "$INSTALL_DIR/nockchain" ]; then
-        echo "📦 Nockchain: Installed ($(get_installed_version))"
-        check_for_updates >/dev/null
+        echo "📦 Nockchain: Installed ($(get_installed_nockchain_version))"
+        check_for_nockchain_updates >/dev/null
         update_status=$?
         if [ $update_status -eq 0 ]; then
-            echo "🔄 Update Status: Update available!"
+            echo "🔄 Nockchain Update Status: Update available!"
         elif [ $update_status -eq 3 ]; then
-            echo "🔄 Update Status: Up to date"
+            echo "🔄 Nockchain Update Status: Up to date"
         fi
     else
         echo "📦 Nockchain: Not installed"
@@ -409,6 +488,12 @@ display_help() {
     echo ""
     echo "  update     - Update nockchain binaries and helper script"
     echo "               Usage: nockhelper update"
+    echo ""
+    echo "  update-nockchain - Update nockchain binaries"
+    echo "               Usage: nockhelper update-nockchain"
+    echo ""
+    echo "  update-nockhelper - Update nockhelper script"
+    echo "               Usage: nockhelper update-nockhelper"
     echo ""
     echo "  download   - Download/update nockchain binaries from latest release"
     echo "               Usage: nockhelper download"
@@ -454,6 +539,8 @@ check_status() {
     echo "Nockchain Status:"
     echo "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
     
+    echo "🛠️ Nockhelper version: $(get_installed_nockhelper_version)"
+    
     if [ -d "$INSTALL_DIR" ]; then
         echo "📂 Installation directory: $INSTALL_DIR (exists)"
     else
@@ -462,8 +549,8 @@ check_status() {
     
     if [ -x "$INSTALL_DIR/nockchain" ]; then
         echo "📦 Nockchain binary: Found and executable"
-        echo "📦 Installed version: $(get_installed_version)"
-        check_for_updates
+        echo "📦 Nockchain version: $(get_installed_nockchain_version)"
+        check_for_nockchain_updates
     else
         echo "📦 Nockchain binary: Not found or not executable"
     fi
@@ -607,11 +694,12 @@ update_nockchain() {
     echo "║                     UPDATING NOCKCHAIN                          ║"
     echo "╚═════════════════════════════════════════════════════════════════╝"
     
-    local installed_version=$(get_installed_version)
+    local installed_version=$(get_installed_nockchain_version)
     local latest_version=$(get_latest_release_tag)
     
-    echo "Installed version: $installed_version"
-    echo "Latest version:    $latest_version"
+    echo "Nockchain:"
+    echo "  Installed version: $installed_version"
+    echo "  Latest version:    $latest_version"
     
     # Check if update is needed
     if [[ "$installed_version" != "not_installed" ]] && [[ "$installed_version" != *"unknown"* ]] && [[ "$latest_version" != "unknown" ]]; then
@@ -620,15 +708,50 @@ update_nockchain() {
         latest_version=${latest_version#v}
         
         if ! version_gt "$latest_version" "$installed_version"; then
-            echo "ℹ️ You already have the latest version ($installed_version)."
-            if ! confirm "Do you want to continue with the update anyway?"; then
-                echo "Update cancelled."
+            echo "ℹ️ You already have the latest nockchain version ($installed_version)."
+            if ! confirm "Do you want to continue with the nockchain update anyway?"; then
+                echo "Nockchain update cancelled."
+                update_nockhelper
                 return
             fi
         fi
     fi
     
-    # Try to download the latest helper script first
+    # Update binaries
+    install_nockchain
+    
+    echo "✅ Nockchain update complete!"
+}
+
+# Update nockhelper
+update_nockhelper() {
+    echo "╔═════════════════════════════════════════════════════════════════╗"
+    echo "║                     UPDATING NOCKHELPER                         ║"
+    echo "╚═════════════════════════════════════════════════════════════════╝"
+    
+    local installed_version=$(get_installed_nockhelper_version)
+    local latest_version=$(get_latest_nockhelper_version)
+    
+    echo "Nockhelper:"
+    echo "  Installed version: $installed_version"
+    echo "  Latest version:    $latest_version"
+    
+    # Check if update is needed
+    if [[ "$latest_version" != "unknown" ]]; then
+        # Remove 'v' prefix if present
+        installed_version=${installed_version#v}
+        latest_version=${latest_version#v}
+        
+        if ! version_gt "$latest_version" "$installed_version"; then
+            echo "ℹ️ You already have the latest nockhelper version ($installed_version)."
+            if ! confirm "Do you want to continue with the nockhelper update anyway?"; then
+                echo "Nockhelper update cancelled."
+                return
+            fi
+        fi
+    fi
+    
+    # Try to download the latest helper script
     if command_exists curl; then
         if curl -s --head --fail "$HELPER_REMOTE" >/dev/null; then
             echo "Updating helper script..."
@@ -641,17 +764,46 @@ update_nockchain() {
                 exec "$HELPER_SCRIPT" update
                 exit 0
             else
-                echo "❌ Failed to download updated helper script. Continuing with binary update."
+                echo "❌ Failed to download updated helper script."
             fi
         else
-            echo "ℹ️ Helper script not found at remote URL. Continuing with binary update."
+            echo "ℹ️ Helper script not found at remote URL."
         fi
+    elif command_exists wget; then
+        if wget --spider "$HELPER_REMOTE" 2>/dev/null; then
+            echo "Updating helper script..."
+            wget -q "$HELPER_REMOTE" -O "$HELPER_SCRIPT.new"
+            if [ -f "$HELPER_SCRIPT.new" ]; then
+                chmod +x "$HELPER_SCRIPT.new"
+                mv "$HELPER_SCRIPT.new" "$HELPER_SCRIPT"
+                echo "✅ Helper script updated."
+                # Execute the updated script for the rest of the update
+                exec "$HELPER_SCRIPT" update
+                exit 0
+            else
+                echo "❌ Failed to download updated helper script."
+            fi
+        else
+            echo "ℹ️ Helper script not found at remote URL."
+        fi
+    else
+        echo "❌ Neither curl nor wget found. Cannot update helper script."
     fi
     
-    # Then update binaries
-    install_nockchain
+    echo "✅ Nockhelper update complete!"
+}
+
+# Update both nockchain and nockhelper
+update_all() {
+    echo "╔═════════════════════════════════════════════════════════════════╗"
+    echo "║                     UPDATING ALL COMPONENTS                     ║"
+    echo "╚═════════════════════════════════════════════════════════════════╝"
     
-    echo "✅ Update complete!"
+    update_nockhelper
+    echo ""
+    update_nockchain
+    
+    echo "✅ All updates complete!"
 }
 
 # Uninstall nockchain
@@ -741,7 +893,7 @@ run_nockchain() {
     local shell=$(detect_shell)
     
     # Create the screen session with the preferred shell
-    screen -dmS nock $shell -c "cd $INSTALL_DIR && rm -rf ./.data.nockchain .socket/nockchain_npc.sock && mkdir -p .socket && $NOCKCHAIN_ENV_VARS && ./nockchain --mining-pubkey $MINING_PUBKEY --mine --peer /ip4/95.216.102.60/udp/3006/quic-v1 --peer /ip4/65.108.123.225/udp/3006/quic-v1 --peer /ip4/65.109.156.108/udp/3006/quic-v1 --peer /ip4/65.21.67.175/udp/3006/quic-v1 --peer /ip4/65.109.156.172/udp/3006/quic-v1 --peer /ip4/34.174.22.166/udp/3006/quic-v1 --peer /ip4/34.95.155.151/udp/30000/quic-v1 --peer /ip4/34.18.98.38/udp/30000/quic-v1; exec $shell"
+    screen -dmS nock $shell -c "cd $INSTALL_DIR && rm -rf ./.data.nockchain .socket/nockchain_npc.sock && ./nockchain --mining-pubkey $MINING_PUBKEY --mine --peer /ip4/95.216.102.60/udp/3006/quic-v1 --peer /ip4/65.108.123.225/udp/3006/quic-v1 --peer /ip4/65.109.156.108/udp/3006/quic-v1 --peer /ip4/65.21.67.175/udp/3006/quic-v1 --peer /ip4/65.109.156.172/udp/3006/quic-v1 --peer /ip4/34.174.22.166/udp/3006/quic-v1 --peer /ip4/34.95.155.151/udp/30000/quic-v1 --peer /ip4/34.18.98.38/udp/30000/quic-v1; exec $shell"
     
     echo "✅ Nockchain miner is now running in a screen session named 'nock'"
     echo ""
@@ -769,7 +921,13 @@ main() {
             install_nockchain
             ;;
         update)
+            update_all
+            ;;
+        update-nockchain)
             update_nockchain
+            ;;
+        update-nockhelper)
+            update_nockhelper
             ;;
         download)
             download_binaries
