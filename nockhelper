@@ -492,6 +492,123 @@ check_for_updates() {
     return 0
 }
 
+# Function to delete nockchain instance directories
+delete_nockchain_instances() {
+    local instance_id=$1
+    
+    echo "╔═════════════════════════════════════════════════════════════════╗"
+    echo "║                 DELETING NOCKCHAIN INSTANCES                    ║"
+    echo "╚═════════════════════════════════════════════════════════════════╝"
+    
+    if [ "$instance_id" = "all" ]; then
+        echo "Deleting all nockchain instance directories..."
+        
+        # Check if any instance directories exist
+        local count=0
+        for dir in "$INSTALL_DIR"/nock-*; do
+            if [ -d "$dir" ]; then
+                count=$((count+1))
+            fi
+        done
+        
+        if [ $count -eq 0 ]; then
+            echo "❌ No nockchain instance directories found."
+            return 1
+        fi
+        
+        # Confirm deletion of all instances
+        if ! confirm "Are you sure you want to delete all $count nockchain instance directories?"; then
+            echo "Deletion cancelled."
+            return 0
+        fi
+        
+        # Stop all running instances first
+        if command_exists screen; then
+            while read -r line; do
+                if [[ $line =~ nock-([0-9]+) ]]; then
+                    local session="nock-${BASH_REMATCH[1]}"
+                    echo "Stopping screen session $session..."
+                    # First try to gracefully terminate the nockchain process
+                    screen -S "$session" -X stuff $'\003'  # Send Ctrl+C
+                    sleep 1
+                    # Then quit the screen session
+                    screen -S "$session" -X quit 2>/dev/null || true
+                fi
+            done < <(screen -list | grep -o "nock-[0-9]\+")
+        fi
+        
+        # Delete all instance directories
+        for dir in "$INSTALL_DIR"/nock-*; do
+            if [ -d "$dir" ]; then
+                echo "Removing $dir..."
+                rm -rf "$dir"
+            fi
+        done
+        
+        echo "✅ All nockchain instance directories have been deleted."
+    else
+        # Check if instance_id includes "nock-" prefix
+        local screen_name=""
+        local instance_dir=""
+        
+        if [[ "$instance_id" == nock-* ]]; then
+            # Format is nock-N
+            screen_name="$instance_id"
+            instance_num=${instance_id#nock-}
+            instance_dir="$INSTALL_DIR/$instance_id"
+        elif [[ "$instance_id" =~ ^[0-9]+$ ]]; then
+            # Format is just N
+            screen_name="nock-$instance_id"
+            instance_dir="$INSTALL_DIR/$screen_name"
+        else
+            echo "❌ Invalid instance ID format. Use 'nock-N', 'N', or 'all'."
+            return 1
+        fi
+        
+        if [ ! -d "$instance_dir" ]; then
+            echo "❌ Nockchain instance directory not found: $instance_dir"
+            return 1
+        fi
+        
+        # Confirm deletion of specific instance
+        if ! confirm "Are you sure you want to delete nockchain instance $screen_name?"; then
+            echo "Deletion cancelled."
+            return 0
+        fi
+        
+        # Stop the running instance first
+        if command_exists screen; then
+            if screen -list | grep -q "$screen_name"; then
+                echo "Stopping screen session $screen_name..."
+                
+                # First try to gracefully terminate the nockchain process with Ctrl+C
+                echo "Sending termination signal to nockchain process..."
+                screen -S "$screen_name" -X stuff $'\003'  # Send Ctrl+C
+                
+                # Give it a moment to shut down
+                sleep 2
+                
+                # Now quit the screen session
+                echo "Terminating screen session..."
+                screen -S "$screen_name" -X quit 2>/dev/null || true
+                
+                # Wait a bit to ensure the screen session is fully terminated
+                sleep 1
+            else
+                echo "No running screen session found for $screen_name."
+            fi
+        fi
+        
+        # Delete instance directory
+        echo "Removing $instance_dir..."
+        rm -rf "$instance_dir"
+        
+        echo "✅ Nockchain instance $screen_name has been deleted."
+    fi
+    
+    return 0
+}
+
 # Display help message
 display_help() {
     echo "╔═════════════════════════════════════════════════════════════════╗"
@@ -541,6 +658,12 @@ display_help() {
     echo ""
     echo "  run <N>    - Run N instances of nockchain miners in separate screen sessions"
     echo "               Usage: nockhelper run 10"
+    echo ""
+    echo "  del <id>   - Delete a specific nockchain instance directory"
+    echo "               Usage: nockhelper del 1"
+    echo ""
+    echo "  del all    - Delete all nockchain instance directories"
+    echo "               Usage: nockhelper del all"
     echo ""
     echo "  uninstall  - Remove nockchain installation"
     echo "               Usage: nockhelper uninstall"
@@ -1091,6 +1214,14 @@ main() {
                 # Otherwise, run a single instance
                 run_nockchain
             fi
+            ;;
+        del)
+            if [ -z "$arg2" ]; then
+                echo "❌ Please specify an instance ID or 'all'"
+                display_help
+                exit 1
+            fi
+            delete_nockchain_instances "$arg2"
             ;;
         status)
             check_status
