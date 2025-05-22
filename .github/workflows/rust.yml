@@ -2,6 +2,19 @@ name: Build Release Binaries
 
 on:
   workflow_dispatch:
+    inputs:
+      build_linux_x86_64:
+        description: 'Build for Linux x86_64'
+        type: boolean
+        default: true
+      build_macos_arm64:
+        description: 'Build for macOS ARM64'
+        type: boolean
+        default: true
+      build_macos_x86_64:
+        description: 'Build for macOS x86_64'
+        type: boolean
+        default: false
 
   push:
     branches:
@@ -20,11 +33,15 @@ jobs:
         include:
           - os: ubuntu-latest
             suffix: linux-x86_64
+            enabled: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_linux_x86_64 == 'true' }}
           - os: macos-latest
             suffix: macos-arm64
+            enabled: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_macos_arm64 == 'true' }}
           - os: macos-13
             suffix: macos-x86_64
+            enabled: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_macos_x86_64 == 'true' }}
     runs-on: ${{ matrix.os }}
+    if: ${{ matrix.enabled }}
 
     steps:
       - name: Checkout repository
@@ -112,12 +129,26 @@ jobs:
         with:
           path: all-artifacts
 
+      - name: Prepare release files
+        run: |
+          mkdir -p release-files
+          
+          # Check if each platform artifact exists and copy it to release-files
+          if [ -d "all-artifacts/nockchain-binaries-linux-x86_64" ]; then
+            cp all-artifacts/nockchain-binaries-linux-x86_64/nockchain-all-linux-x86_64.zip release-files/
+          fi
+          
+          if [ -d "all-artifacts/nockchain-binaries-macos-arm64" ]; then
+            cp all-artifacts/nockchain-binaries-macos-arm64/nockchain-all-macos-arm64.zip release-files/
+          fi
+          
+          if [ -d "all-artifacts/nockchain-binaries-macos-x86_64" ]; then
+            cp all-artifacts/nockchain-binaries-macos-x86_64/nockchain-all-macos-x86_64.zip release-files/
+          fi
+
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            all-artifacts/nockchain-binaries-linux-x86_64/nockchain-all-linux-x86_64.zip
-            all-artifacts/nockchain-binaries-macos-arm64/nockchain-all-macos-arm64.zip
-            all-artifacts/nockchain-binaries-macos-x86_64/nockchain-all-macos-x86_64.zip
+          files: release-files/*.zip
           generate_release_notes: true
