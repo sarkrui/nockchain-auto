@@ -33,15 +33,19 @@ jobs:
         include:
           - os: ubuntu-latest
             suffix: linux-x86_64
-            enabled: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_linux_x86_64 == 'true' }}
+            platform: linux_x86_64
           - os: macos-latest
             suffix: macos-arm64
-            enabled: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_macos_arm64 == 'true' }}
+            platform: macos_arm64
           - os: macos-13
             suffix: macos-x86_64
-            enabled: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_macos_x86_64 == 'true' }}
+            platform: macos_x86_64
     runs-on: ${{ matrix.os }}
-    if: ${{ matrix.enabled }}
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      (matrix.platform != 'linux_x86_64' || github.event.inputs.build_linux_x86_64 == 'true') &&
+      (matrix.platform != 'macos_arm64' || github.event.inputs.build_macos_arm64 == 'true') &&
+      (matrix.platform != 'macos_x86_64' || github.event.inputs.build_macos_x86_64 == 'true')
 
     steps:
       - name: Checkout repository
