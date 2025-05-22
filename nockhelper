@@ -31,6 +31,142 @@ confirm() {
     esac
 }
 
+# Function to check and install dependencies
+check_dependencies() {
+    echo "╔═════════════════════════════════════════════════════════════════╗"
+    echo "║                    CHECKING DEPENDENCIES                         ║"
+    echo "╚═════════════════════════════════════════════════════════════════╝"
+    
+    local os=$(detect_os)
+    local missing_deps=()
+    local deps=("curl" "git" "wget" "btop")
+    
+    # Check for missing dependencies
+    for dep in "${deps[@]}"; do
+        if ! command_exists "$dep"; then
+            missing_deps+=("$dep")
+        else
+            echo "✅ $dep is already installed."
+        fi
+    done
+    
+    # If all dependencies are installed
+    if [ ${#missing_deps[@]} -eq 0 ]; then
+        echo "All dependencies are installed."
+        return 0
+    fi
+    
+    # Ask user to install missing dependencies
+    echo "The following dependencies are missing: ${missing_deps[*]}"
+    if ! confirm "Would you like to install them?"; then
+        echo "Dependencies installation skipped. Some features may not work properly."
+        return 1
+    fi
+    
+    # Install missing dependencies based on OS
+    if [[ "$os" == "macos" ]]; then
+        if ! command_exists brew; then
+            echo "Homebrew is required but was not found."
+            if confirm "Would you like to install Homebrew?"; then
+                /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            else
+                echo "Homebrew installation skipped. Cannot install dependencies without Homebrew."
+                return 1
+            fi
+        fi
+        
+        for dep in "${missing_deps[@]}"; do
+            echo "Installing $dep using Homebrew..."
+            brew install "$dep"
+        done
+    elif [[ "$os" == "linux" ]]; then
+        if command_exists apt-get; then
+            echo "Installing dependencies using apt-get..."
+            sudo apt-get update
+            sudo apt-get install -y "${missing_deps[@]}"
+        elif command_exists yum; then
+            echo "Installing dependencies using yum..."
+            sudo yum install -y "${missing_deps[@]}"
+        else
+            echo "Cannot automatically install dependencies. Please install them manually and try again."
+            return 1
+        fi
+    fi
+    
+    # Verify installation
+    local still_missing=()
+    for dep in "${missing_deps[@]}"; do
+        if ! command_exists "$dep"; then
+            still_missing+=("$dep")
+        else
+            echo "✅ $dep installed successfully."
+        fi
+    done
+    
+    if [ ${#still_missing[@]} -eq 0 ]; then
+        echo "All dependencies installed successfully."
+        return 0
+    else
+        echo "The following dependencies could not be installed: ${still_missing[*]}"
+        echo "Please install them manually and try again."
+        return 1
+    fi
+}
+
+# Function to download/update release binaries
+download_binaries() {
+    echo "╔═════════════════════════════════════════════════════════════════╗"
+    echo "║                DOWNLOADING NOCKCHAIN BINARIES                    ║"
+    echo "╚═════════════════════════════════════════════════════════════════╝"
+    
+    # Check dependencies first
+    check_dependencies
+    
+    local os=$(detect_os)
+    local arch=$(detect_arch)
+    
+    echo "Detected: $os on $arch"
+    
+    # Create installation directory if it doesn't exist
+    if [ ! -d "$INSTALL_DIR" ]; then
+        echo "Creating installation directory: $INSTALL_DIR"
+        mkdir -p "$INSTALL_DIR"
+    fi
+    
+    # Set download URL based on OS and architecture
+    local download_url="https://github.com/sarkrui/nockchain-auto/releases/latest/download/nockchain-all-$os-$arch.zip"
+    local temp_zip="$INSTALL_DIR/nockchain-all-$os-$arch.zip"
+    
+    echo "Downloading nockchain binaries from: $download_url"
+    
+    # Download the zip file
+    if command_exists curl; then
+        curl -L "$download_url" -o "$temp_zip"
+    else
+        wget "$download_url" -O "$temp_zip"
+    fi
+    
+    if [ ! -f "$temp_zip" ]; then
+        echo "Failed to download nockchain binaries"
+        exit 1
+    fi
+    
+    # Extract the zip file
+    echo "Extracting binaries to $INSTALL_DIR"
+    unzip -o "$temp_zip" -d "$INSTALL_DIR"
+    
+    # Make binaries executable
+    echo "Making binaries executable"
+    chmod +x "$INSTALL_DIR/nockchain-wallet" "$INSTALL_DIR/equix-latency" "$INSTALL_DIR/hoonc" "$INSTALL_DIR/nockchain" "$INSTALL_DIR/nockchain-bitcoin-sync"
+    
+    # Clean up
+    echo "Cleaning up"
+    rm "$temp_zip"
+    
+    echo "✅ Download complete!"
+    echo "📂 Nockchain binaries have been downloaded to: $INSTALL_DIR"
+}
+
 # Detect operating system
 detect_os() {
     if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -161,8 +297,9 @@ install_helper_globally() {
 
 # Display help message
 display_help() {
+    clear
     echo "╔═════════════════════════════════════════════════════════════════╗"
-    echo "║                    🚀 NOCKCHAIN HELPER TOOL 🚀                   ║"
+    echo "║                      NOCKCHAIN HELPER TOOL                      ║"
     echo "╚═════════════════════════════════════════════════════════════════╝"
     echo ""
     echo "CURRENT STATUS:"
@@ -183,6 +320,9 @@ display_help() {
     echo ""
     echo "  update     - Update nockchain binaries and helper script"
     echo "               Usage: nockhelper update"
+    echo ""
+    echo "  download   - Download/update nockchain binaries from latest release"
+    echo "               Usage: nockhelper download"
     echo ""
     echo "  run        - Run nockchain miner in a screen session"
     echo "               Usage: nockhelper run"
@@ -247,7 +387,7 @@ install_nockchain() {
     local arch=$(detect_arch)
     
     echo "╔═════════════════════════════════════════════════════════════════╗"
-    echo "║                   NOCKCHAIN INSTALLATION WIZARD                  ║"
+    echo "║                   NOCKCHAIN INSTALLATION WIZARD                 ║"
     echo "╚═════════════════════════════════════════════════════════════════╝"
     echo "Detected: $os on $arch"
 
@@ -359,7 +499,7 @@ install_nockchain() {
 # Update nockchain
 update_nockchain() {
     echo "╔═════════════════════════════════════════════════════════════════╗"
-    echo "║                     UPDATING NOCKCHAIN                           ║"
+    echo "║                     UPDATING NOCKCHAIN                          ║"
     echo "╚═════════════════════════════════════════════════════════════════╝"
     
     # Try to download the latest helper script first
@@ -391,7 +531,7 @@ update_nockchain() {
 # Uninstall nockchain
 uninstall_nockchain() {
     echo "╔═════════════════════════════════════════════════════════════════╗"
-    echo "║                    UNINSTALLING NOCKCHAIN                        ║"
+    echo "║                    UNINSTALLING NOCKCHAIN                       ║"
     echo "╚═════════════════════════════════════════════════════════════════╝"
     
     if ! confirm "Are you sure you want to uninstall nockchain from $INSTALL_DIR?"; then
@@ -440,7 +580,7 @@ uninstall_nockchain() {
 # Run nockchain miner in screen
 run_nockchain() {
     echo "╔═════════════════════════════════════════════════════════════════╗"
-    echo "║                    STARTING NOCKCHAIN MINER                      ║"
+    echo "║                    STARTING NOCKCHAIN MINER                     ║"
     echo "╚═════════════════════════════════════════════════════════════════╝"
     
     if ! command_exists screen; then
@@ -498,6 +638,9 @@ main() {
             ;;
         update)
             update_nockchain
+            ;;
+        download)
+            download_binaries
             ;;
         uninstall)
             uninstall_nockchain
