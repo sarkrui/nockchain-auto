@@ -113,10 +113,28 @@ check_dependencies() {
     fi
 }
 
+# Function to get the latest release tag from GitHub
+get_latest_release_tag() {
+    local repo="sarkrui/nockchain-auto"
+    local tag=""
+    
+    if command_exists curl; then
+        tag=$(curl -s "https://api.github.com/repos/$repo/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    elif command_exists wget; then
+        tag=$(wget -qO- "https://api.github.com/repos/$repo/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    fi
+    
+    if [ -z "$tag" ]; then
+        echo "unknown"
+    else
+        echo "$tag"
+    fi
+}
+
 # Function to download/update release binaries
 download_binaries() {
     echo "╔═════════════════════════════════════════════════════════════════╗"
-    echo "║                DOWNLOADING NOCKCHAIN BINARIES                    ║"
+    echo "║                DOWNLOADING NOCKCHAIN BINARIES                   ║"
     echo "╚═════════════════════════════════════════════════════════════════╝"
     
     # Check dependencies first
@@ -124,8 +142,10 @@ download_binaries() {
     
     local os=$(detect_os)
     local arch=$(detect_arch)
+    local release_tag=$(get_latest_release_tag)
     
     echo "Detected: $os on $arch"
+    echo "Latest release: $release_tag"
     
     # Create installation directory if it doesn't exist
     if [ ! -d "$INSTALL_DIR" ]; then
@@ -137,7 +157,7 @@ download_binaries() {
     local download_url="https://github.com/sarkrui/nockchain-auto/releases/latest/download/nockchain-all-$os-$arch.zip"
     local temp_zip="$INSTALL_DIR/nockchain-all-$os-$arch.zip"
     
-    echo "Downloading nockchain binaries from: $download_url"
+    echo "Downloading nockchain binaries from: $download_url ($release_tag)"
     
     # Download the zip file
     if command_exists curl; then
@@ -295,6 +315,68 @@ install_helper_globally() {
     echo "nockhelper installed globally. Please restart your terminal or run 'source $shell_rc' to use it."
 }
 
+# Function to get the installed nockchain version
+get_installed_version() {
+    if [ ! -x "$INSTALL_DIR/nockchain" ]; then
+        echo "not_installed"
+        return
+    fi
+    
+    # Try to get version from nockchain binary
+    local version=$("$INSTALL_DIR/nockchain" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
+    
+    # If that fails, try to get a timestamp from the binary
+    if [ -z "$version" ]; then
+        local file_date=$(stat -c %y "$INSTALL_DIR/nockchain" 2>/dev/null || stat -f "%Sm" "$INSTALL_DIR/nockchain" 2>/dev/null)
+        if [ -n "$file_date" ]; then
+            echo "unknown (installed on $file_date)"
+            return
+        else
+            echo "unknown"
+            return
+        fi
+    fi
+    
+    echo "$version"
+}
+
+# Function to compare versions
+version_gt() {
+    test "$(printf '%s\n' "$1" "$2" | sort -V | head -n 1)" != "$1"
+}
+
+# Function to check for updates
+check_for_updates() {
+    local installed_version=$(get_installed_version)
+    local latest_version=$(get_latest_release_tag)
+    
+    if [ "$installed_version" = "not_installed" ]; then
+        echo "ℹ️ Nockchain is not installed."
+        return 1
+    fi
+    
+    echo "Installed version: $installed_version"
+    echo "Latest version:    $latest_version"
+    
+    # If either version is unknown, we can't compare
+    if [[ "$installed_version" == *"unknown"* ]] || [[ "$latest_version" == "unknown" ]]; then
+        echo "ℹ️ Cannot determine if an update is needed."
+        return 2
+    fi
+    
+    # Remove 'v' prefix if present
+    installed_version=${installed_version#v}
+    latest_version=${latest_version#v}
+    
+    if version_gt "$latest_version" "$installed_version"; then
+        echo "✅ Update available! Version $latest_version is newer than your installed version $installed_version."
+        return 0
+    else
+        echo "✅ You have the latest version ($installed_version)."
+        return 3
+    fi
+}
+
 # Display help message
 display_help() {
     clear
@@ -306,7 +388,14 @@ display_help() {
     echo "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
     echo "📂 Install Location: $INSTALL_DIR"
     if [ -x "$INSTALL_DIR/nockchain" ]; then
-        echo "📦 Nockchain: Installed"
+        echo "📦 Nockchain: Installed ($(get_installed_version))"
+        check_for_updates >/dev/null
+        update_status=$?
+        if [ $update_status -eq 0 ]; then
+            echo "🔄 Update Status: Update available!"
+        elif [ $update_status -eq 3 ]; then
+            echo "🔄 Update Status: Up to date"
+        fi
     else
         echo "📦 Nockchain: Not installed"
     fi
@@ -323,6 +412,9 @@ display_help() {
     echo ""
     echo "  download   - Download/update nockchain binaries from latest release"
     echo "               Usage: nockhelper download"
+    echo ""
+    echo "  check      - Check for nockchain updates"
+    echo "               Usage: nockhelper check"
     echo ""
     echo "  run        - Run nockchain miner in a screen session"
     echo "               Usage: nockhelper run"
@@ -356,6 +448,9 @@ display_help() {
 
 # Check miner status
 check_status() {
+    # Check dependencies first
+    check_dependencies
+    
     echo "Nockchain Status:"
     echo "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
     
@@ -367,6 +462,8 @@ check_status() {
     
     if [ -x "$INSTALL_DIR/nockchain" ]; then
         echo "📦 Nockchain binary: Found and executable"
+        echo "📦 Installed version: $(get_installed_version)"
+        check_for_updates
     else
         echo "📦 Nockchain binary: Not found or not executable"
     fi
@@ -383,13 +480,18 @@ check_status() {
 
 # Install nockchain
 install_nockchain() {
+    # Check dependencies first
+    check_dependencies
+    
     local os=$(detect_os)
     local arch=$(detect_arch)
+    local release_tag=$(get_latest_release_tag)
     
     echo "╔═════════════════════════════════════════════════════════════════╗"
     echo "║                   NOCKCHAIN INSTALLATION WIZARD                 ║"
     echo "╚═════════════════════════════════════════════════════════════════╝"
     echo "Detected: $os on $arch"
+    echo "Latest release: $release_tag"
 
     # Install screen using Homebrew on macOS
     if [[ "$os" == "macos" ]]; then
@@ -459,7 +561,7 @@ install_nockchain() {
     local download_url="https://github.com/sarkrui/nockchain-auto/releases/latest/download/nockchain-all-$os-$arch.zip"
     local temp_zip="$INSTALL_DIR/nockchain-all-$os-$arch.zip"
 
-    echo "Downloading nockchain binaries from: $download_url"
+    echo "Downloading nockchain binaries from: $download_url ($release_tag)"
     
     # Download the zip file
     if command_exists curl; then
@@ -498,9 +600,33 @@ install_nockchain() {
 
 # Update nockchain
 update_nockchain() {
+    # Check dependencies first
+    check_dependencies
+    
     echo "╔═════════════════════════════════════════════════════════════════╗"
     echo "║                     UPDATING NOCKCHAIN                          ║"
     echo "╚═════════════════════════════════════════════════════════════════╝"
+    
+    local installed_version=$(get_installed_version)
+    local latest_version=$(get_latest_release_tag)
+    
+    echo "Installed version: $installed_version"
+    echo "Latest version:    $latest_version"
+    
+    # Check if update is needed
+    if [[ "$installed_version" != "not_installed" ]] && [[ "$installed_version" != *"unknown"* ]] && [[ "$latest_version" != "unknown" ]]; then
+        # Remove 'v' prefix if present
+        installed_version=${installed_version#v}
+        latest_version=${latest_version#v}
+        
+        if ! version_gt "$latest_version" "$installed_version"; then
+            echo "ℹ️ You already have the latest version ($installed_version)."
+            if ! confirm "Do you want to continue with the update anyway?"; then
+                echo "Update cancelled."
+                return
+            fi
+        fi
+    fi
     
     # Try to download the latest helper script first
     if command_exists curl; then
@@ -530,6 +656,9 @@ update_nockchain() {
 
 # Uninstall nockchain
 uninstall_nockchain() {
+    # Check dependencies first
+    check_dependencies
+    
     echo "╔═════════════════════════════════════════════════════════════════╗"
     echo "║                    UNINSTALLING NOCKCHAIN                       ║"
     echo "╚═════════════════════════════════════════════════════════════════╝"
@@ -579,6 +708,9 @@ uninstall_nockchain() {
 
 # Run nockchain miner in screen
 run_nockchain() {
+    # Check dependencies first
+    check_dependencies
+    
     echo "╔═════════════════════════════════════════════════════════════════╗"
     echo "║                    STARTING NOCKCHAIN MINER                     ║"
     echo "╚═════════════════════════════════════════════════════════════════╝"
@@ -641,6 +773,9 @@ main() {
             ;;
         download)
             download_binaries
+            ;;
+        check)
+            check_for_updates
             ;;
         uninstall)
             uninstall_nockchain
