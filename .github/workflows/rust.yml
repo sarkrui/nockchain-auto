@@ -95,16 +95,35 @@ jobs:
           zip ../nockchain-all-${{ matrix.suffix }}.zip *
           cd ../..
 
-      - name: Upload individual binaries
+      - name: Upload nockchain binary
         uses: actions/upload-artifact@v4
         with:
-          name: nockchain-binaries-${{ matrix.suffix }}
-          path: |
-            artifacts/nockchain-${{ matrix.suffix }}
-            artifacts/nockchain-wallet-${{ matrix.suffix }}
-            artifacts/equix-latency-${{ matrix.suffix }}
-            artifacts/hoonc-${{ matrix.suffix }}
-            artifacts/nockchain-bitcoin-sync-${{ matrix.suffix }}
+          name: nockchain-${{ matrix.suffix }}
+          path: artifacts/nockchain-${{ matrix.suffix }}
+      
+      - name: Upload nockchain-wallet binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: nockchain-wallet-${{ matrix.suffix }}
+          path: artifacts/nockchain-wallet-${{ matrix.suffix }}
+      
+      - name: Upload equix-latency binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: equix-latency-${{ matrix.suffix }}
+          path: artifacts/equix-latency-${{ matrix.suffix }}
+      
+      - name: Upload hoonc binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: hoonc-${{ matrix.suffix }}
+          path: artifacts/hoonc-${{ matrix.suffix }}
+      
+      - name: Upload nockchain-bitcoin-sync binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: nockchain-bitcoin-sync-${{ matrix.suffix }}
+          path: artifacts/nockchain-bitcoin-sync-${{ matrix.suffix }}
             
       - name: Upload zip artifact
         uses: actions/upload-artifact@v4
