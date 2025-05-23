@@ -1155,7 +1155,7 @@ run_batch_nockchain() {
         
         # Create screen session for this instance
         echo "Starting nockchain instance $i in screen session '$screen_name'..."
-        screen -dmS "$screen_name" $shell -c "$env_vars && cd $instance_dir && rm -rf ./.data.nockchain .socket/nockchain_npc.sock && ./nockchain --mining-pubkey $MINING_PUBKEY --mine --peer /ip4/95.216.102.60/udp/3006/quic-v1 --peer /ip4/65.108.123.225/udp/3006/quic-v1 --peer /ip4/65.109.156.108/udp/3006/quic-v1 --peer /ip4/65.21.67.175/udp/3006/quic-v1 --peer /ip4/65.109.156.172/udp/3006/quic-v1 --peer /ip4/34.174.22.166/udp/3006/quic-v1 --peer /ip4/34.95.155.151/udp/30000/quic-v1 --peer /ip4/34.18.98.38/udp/30000/quic-v1; exec $shell"
+        screen -dmS "$screen_name" $shell -c "$env_vars && cd $instance_dir && rm -rf ./.data.nockchain .socket/nockchain_npc.sock && ./nockchain --mining-pubkey $MINING_PUBKEY --mine --peer /ip4/95.216.102.60/udp/3006/quic-v1 --peer /ip4/65.108.123.225/udp/3006/quic-v1 --peer /ip4/65.109.156.108/udp/3006/quic-v1 --peer /ip4/65.21.67.175/udp/3006/quic-v1 --peer /ip4/65.109.156.172/udp/3006/quic-v1 --peer /ip4/34.174.22.166/udp/3006/quic-v1 --peer /ip4/34.95.155.151/udp/30000/quic-v1 --peer /ip4/34.18.98.38/udp/30000/quic-v1 --peer /ip4/96.230.252.205/udp/3006/quic-v1 --peer /ip4/94.205.40.29/udp/3006/quic-v1 --peer /ip4/159.112.204.186/udp/3006/quic-v1 --peer /ip4/217.14.223.78/udp/3006/quic-v1; exec $shell"
         
         echo "✅ Started nockchain instance $i in screen session '$screen_name'"
     done
