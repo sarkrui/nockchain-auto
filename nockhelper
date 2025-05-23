@@ -6,12 +6,20 @@ set -e
 MINING_PUBKEY="2cLQ54ec6Caq9C4mTZoSk2Kv4XjJ3vzhyDehgdvEQue6dXZPp9jAa2ZqsaJciB3ZZXomoCjGp53GiyVJNSx2KDn8ehmNGdWcqBsfosDCsAQLDSBW8KgaDDHL4ojiFMSMtHbc"
 
 # Nockhelper version
-NOCKHELPER_VERSION="1.0.2"
+NOCKHELPER_VERSION="1.0.3"
 
 # Installation directory
 INSTALL_DIR="$HOME/nockbin"
 HELPER_SCRIPT="$INSTALL_DIR/nockhelper"
 HELPER_REMOTE="https://raw.githubusercontent.com/sarkrui/nockchain-auto/refs/heads/master/nockhelper"
+
+# OS-specific system bin directory
+SYS_BIN_DIR=""
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    SYS_BIN_DIR="/usr/local/bin"
+else
+    SYS_BIN_DIR="/usr/bin"
+fi
 
 # Environment variables for nockchain
 NOCKCHAIN_ENV_VARS="export RUST_LOG=\"info,nockchain=debug,nockchain_libp2p_io=info,libp2p=info,libp2p_quic=info\" && export MINIMAL_LOG_FORMAT=\"true\""
@@ -288,80 +296,92 @@ get_miner_status() {
 # Install the script globally
 install_helper_globally() {
     local os=$(detect_os)
-    local install_path="$HELPER_SCRIPT"
+    local install_path=""
+    
+    # Determine installation path based on OS
+    if [[ "$os" == "macos" ]]; then
+        install_path="$SYS_BIN_DIR/nockhelper"
+    else
+        install_path="$SYS_BIN_DIR/nockhelper"
+    fi
     
     # First try to download the latest helper script from remote
     if command_exists curl; then
         echo "Downloading latest helper script from remote..."
         if curl -s --head --fail "$HELPER_REMOTE" >/dev/null; then
-            curl -L "$HELPER_REMOTE" -o "$install_path"
-            if [ -f "$install_path" ]; then
-                chmod +x "$install_path"
-                echo "✅ Helper script downloaded and installed from remote."
+            echo "Copying helper script to $install_path..."
+            if [[ "$os" == "macos" ]]; then
+                curl -L "$HELPER_REMOTE" -o "$HELPER_SCRIPT"
+                sudo cp "$HELPER_SCRIPT" "$install_path"
             else
-                echo "❌ Failed to download helper script from remote. Using local copy."
-                cp "$0" "$install_path"
-                chmod +x "$install_path"
+                curl -L "$HELPER_REMOTE" -o "$HELPER_SCRIPT"
+                sudo cp "$HELPER_SCRIPT" "$install_path"
+            fi
+            if [ -f "$install_path" ]; then
+                sudo chmod +x "$install_path"
+                echo "✅ Helper script installed to $install_path."
+            else
+                echo "❌ Failed to install helper script to $install_path. Using local copy in $INSTALL_DIR."
+                cp "$0" "$HELPER_SCRIPT"
+                chmod +x "$HELPER_SCRIPT"
             fi
         else
             echo "ℹ️ Helper script not found at remote URL. Using local copy."
-            cp "$0" "$install_path"
-            chmod +x "$install_path"
+            cp "$0" "$HELPER_SCRIPT"
+            chmod +x "$HELPER_SCRIPT"
+            
+            if [[ "$os" == "macos" ]]; then
+                sudo cp "$HELPER_SCRIPT" "$install_path"
+            else
+                sudo cp "$HELPER_SCRIPT" "$install_path"
+            fi
+            sudo chmod +x "$install_path"
         fi
     elif command_exists wget; then
         echo "Downloading latest helper script from remote..."
         if wget --spider "$HELPER_REMOTE" 2>/dev/null; then
-            wget -q "$HELPER_REMOTE" -O "$install_path"
-            if [ -f "$install_path" ]; then
-                chmod +x "$install_path"
-                echo "✅ Helper script downloaded and installed from remote."
+            echo "Copying helper script to $install_path..."
+            if [[ "$os" == "macos" ]]; then
+                wget -q "$HELPER_REMOTE" -O "$HELPER_SCRIPT"
+                sudo cp "$HELPER_SCRIPT" "$install_path"
             else
-                echo "❌ Failed to download helper script from remote. Using local copy."
-                cp "$0" "$install_path"
-                chmod +x "$install_path"
+                wget -q "$HELPER_REMOTE" -O "$HELPER_SCRIPT"
+                sudo cp "$HELPER_SCRIPT" "$install_path"
+            fi
+            if [ -f "$install_path" ]; then
+                sudo chmod +x "$install_path"
+                echo "✅ Helper script installed to $install_path."
+            else
+                echo "❌ Failed to install helper script to $install_path. Using local copy in $INSTALL_DIR."
+                cp "$0" "$HELPER_SCRIPT"
+                chmod +x "$HELPER_SCRIPT"
             fi
         else
             echo "ℹ️ Helper script not found at remote URL. Using local copy."
-            cp "$0" "$install_path"
-            chmod +x "$install_path"
+            cp "$0" "$HELPER_SCRIPT"
+            chmod +x "$HELPER_SCRIPT"
+            
+            if [[ "$os" == "macos" ]]; then
+                sudo cp "$HELPER_SCRIPT" "$install_path"
+            else
+                sudo cp "$HELPER_SCRIPT" "$install_path"
+            fi
+            sudo chmod +x "$install_path"
         fi
     else
         echo "Neither curl nor wget found. Using local copy."
-        cp "$0" "$install_path"
-        chmod +x "$install_path"
+        cp "$0" "$HELPER_SCRIPT"
+        chmod +x "$HELPER_SCRIPT"
+        
+        if [[ "$os" == "macos" ]]; then
+            sudo cp "$HELPER_SCRIPT" "$install_path"
+        else
+            sudo cp "$HELPER_SCRIPT" "$install_path"
+        fi
+        sudo chmod +x "$install_path"
     fi
     
-    # Add to appropriate shell initialization file
-    if [[ "$os" == "macos" ]]; then
-        local shell_rc="$HOME/.zshrc"
-        if [ ! -f "$shell_rc" ]; then
-            touch "$shell_rc"
-        fi
-        
-        # Check if already in zshrc
-        if ! grep -q "PATH=\"\$PATH:$INSTALL_DIR\"" "$shell_rc"; then
-            echo "" >> "$shell_rc"
-            echo "# Added by nockhelper installer" >> "$shell_rc"
-            echo "export PATH=\"\$PATH:$INSTALL_DIR\"" >> "$shell_rc"
-            echo "Added nockhelper to PATH in $shell_rc"
-        fi
-    else
-        # Linux
-        local shell_rc="$HOME/.bashrc"
-        if [ ! -f "$shell_rc" ]; then
-            touch "$shell_rc"
-        fi
-        
-        # Check if already in bashrc
-        if ! grep -q "PATH=\"\$PATH:$INSTALL_DIR\"" "$shell_rc"; then
-            echo "" >> "$shell_rc"
-            echo "# Added by nockhelper installer" >> "$shell_rc"
-            echo "export PATH=\"\$PATH:$INSTALL_DIR\"" >> "$shell_rc"
-            echo "Added nockhelper to PATH in $shell_rc"
-        fi
-    fi
-    
-    echo "nockhelper installed globally. Please restart your terminal or run 'source $shell_rc' to use it."
+    echo "nockhelper installed globally at $install_path. Binaries will be in $INSTALL_DIR."
 }
 
 # Function to get the installed nockchain version
@@ -609,6 +629,107 @@ delete_nockchain_instances() {
     return 0
 }
 
+# List and manage screen sessions
+list_screen_sessions() {
+    echo "╔═════════════════════════════════════════════════════════════════╗"
+    echo "║                  NOCKCHAIN SCREEN SESSIONS                      ║"
+    echo "╚═════════════════════════════════════════════════════════════════╝"
+    
+    if ! command_exists screen; then
+        echo "❌ screen is not installed."
+        return 1
+    fi
+    
+    # Get all nockchain-related screen sessions
+    local sessions=()
+    local i=0
+    
+    # Check for default nock session
+    if screen -list | grep -q "nock[[:space:]]"; then
+        sessions[$i]="nock"
+        i=$((i+1))
+    fi
+    
+    # Check for batch instances
+    while read -r line; do
+        if [[ $line =~ nock-([0-9]+) ]]; then
+            sessions[$i]="${BASH_REMATCH[0]}"
+            i=$((i+1))
+        fi
+    done < <(screen -list | grep -o "nock-[0-9]\+")
+    
+    # Display sessions
+    if [ ${#sessions[@]} -eq 0 ]; then
+        echo "No nockchain screen sessions found."
+        return 0
+    fi
+    
+    echo "Found ${#sessions[@]} nockchain screen sessions:"
+    echo ""
+    
+    for ((i=0; i<${#sessions[@]}; i++)); do
+        echo "  [$((i+1))] ${sessions[$i]}"
+    done
+    
+    echo ""
+    echo "What would you like to do?"
+    echo "  [a] Attach to a session"
+    echo "  [k] Kill (stop) a session"
+    echo "  [v] View session logs"
+    echo "  [q] Quit this menu"
+    
+    read -p "Enter your choice [a/k/v/q]: " choice
+    
+    case "$choice" in
+        a|A)
+            read -p "Enter session number to attach to: " session_num
+            if [[ "$session_num" =~ ^[0-9]+$ ]] && [ "$session_num" -gt 0 ] && [ "$session_num" -le ${#sessions[@]} ]; then
+                echo "Attaching to session ${sessions[$((session_num-1))]}..."
+                exec screen -r "${sessions[$((session_num-1))]}"
+            else
+                echo "❌ Invalid session number."
+            fi
+            ;;
+        k|K)
+            read -p "Enter session number to kill: " session_num
+            if [[ "$session_num" =~ ^[0-9]+$ ]] && [ "$session_num" -gt 0 ] && [ "$session_num" -le ${#sessions[@]} ]; then
+                echo "Killing session ${sessions[$((session_num-1))]}..."
+                # First try to gracefully terminate the nockchain process
+                screen -S "${sessions[$((session_num-1))]}" -X stuff $'\003'  # Send Ctrl+C
+                sleep 1
+                # Then quit the screen session
+                screen -S "${sessions[$((session_num-1))]}" -X quit 2>/dev/null || true
+                echo "✅ Session terminated."
+            else
+                echo "❌ Invalid session number."
+            fi
+            ;;
+        v|V)
+            read -p "Enter session number to view logs: " session_num
+            if [[ "$session_num" =~ ^[0-9]+$ ]] && [ "$session_num" -gt 0 ] && [ "$session_num" -le ${#sessions[@]} ]; then
+                echo "Viewing logs for session ${sessions[$((session_num-1))]}..."
+                screen -S "${sessions[$((session_num-1))]}" -X hardcopy "/tmp/nockchain_screen_log"
+                if [ -f "/tmp/nockchain_screen_log" ]; then
+                    less "/tmp/nockchain_screen_log"
+                    rm "/tmp/nockchain_screen_log"
+                else
+                    echo "❌ Failed to capture logs."
+                fi
+            else
+                echo "❌ Invalid session number."
+            fi
+            ;;
+        q|Q)
+            echo "Exiting menu."
+            ;;
+        *)
+            echo "❌ Invalid choice."
+            ;;
+    esac
+    
+    return 0
+}
+
 # Display help message
 display_help() {
     echo "╔═════════════════════════════════════════════════════════════════╗"
@@ -658,6 +779,9 @@ display_help() {
     echo ""
     echo "  run <N>    - Run N instances of nockchain miners in separate screen sessions"
     echo "               Usage: nockhelper run 10"
+    echo ""
+    echo "  list       - List and manage nockchain screen sessions"
+    echo "               Usage: nockhelper list"
     echo ""
     echo "  del <id>   - Delete a specific nockchain instance directory"
     echo "               Usage: nockhelper del 1"
@@ -1087,6 +1211,13 @@ run_nockchain() {
     # Detect preferred shell
     local shell=$(detect_shell)
     
+    # For Linux, set vm.overcommit_memory=1
+    local os=$(detect_os)
+    if [[ "$os" == "linux" ]]; then
+        echo "Setting vm.overcommit_memory=1 for Linux..."
+        sudo sysctl -w vm.overcommit_memory=1
+    fi
+    
     # Create the screen session with the preferred shell
     screen -dmS nock $shell -c "cd $INSTALL_DIR && rm -rf ./.data.nockchain .socket/nockchain_npc.sock && ./nockchain --mining-pubkey $MINING_PUBKEY --mine --peer /ip4/95.216.102.60/udp/3006/quic-v1 --peer /ip4/65.108.123.225/udp/3006/quic-v1 --peer /ip4/65.109.156.108/udp/3006/quic-v1 --peer /ip4/65.21.67.175/udp/3006/quic-v1 --peer /ip4/65.109.156.172/udp/3006/quic-v1 --peer /ip4/34.174.22.166/udp/3006/quic-v1 --peer /ip4/34.95.155.151/udp/30000/quic-v1 --peer /ip4/34.18.98.38/udp/30000/quic-v1; exec $shell"
     
@@ -1130,6 +1261,13 @@ run_batch_nockchain() {
     
     # Environment variables for nockchain
     local env_vars="export RUST_LOG=\"info,nockchain=debug,nockchain_libp2p_io=info,libp2p=info,libp2p_quic=info\" && export MINIMAL_LOG_FORMAT=\"true\""
+    
+    # For Linux, set vm.overcommit_memory=1
+    local os=$(detect_os)
+    if [[ "$os" == "linux" ]]; then
+        echo "Setting vm.overcommit_memory=1 for Linux..."
+        sudo sysctl -w vm.overcommit_memory=1
+    fi
     
     # Create directories and start instances
     for ((i=1; i<=$num_instances; i++)); do
@@ -1214,6 +1352,9 @@ main() {
                 # Otherwise, run a single instance
                 run_nockchain
             fi
+            ;;
+        list)
+            list_screen_sessions
             ;;
         del)
             if [ -z "$arg2" ]; then
