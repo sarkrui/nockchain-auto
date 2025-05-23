@@ -6,7 +6,7 @@ set -e
 MINING_PUBKEY="2cLQ54ec6Caq9C4mTZoSk2Kv4XjJ3vzhyDehgdvEQue6dXZPp9jAa2ZqsaJciB3ZZXomoCjGp53GiyVJNSx2KDn8ehmNGdWcqBsfosDCsAQLDSBW8KgaDDHL4ojiFMSMtHbc"
 
 # Nockhelper version
-NOCKHELPER_VERSION="1.0.3"
+NOCKHELPER_VERSION="1.1.0"
 
 # Installation directory
 INSTALL_DIR="$HOME/nockbin"
@@ -24,6 +24,165 @@ fi
 # Environment variables for nockchain
 NOCKCHAIN_ENV_VARS="export RUST_LOG=\"info,nockchain=debug,nockchain_libp2p_io=info,libp2p=info,libp2p_quic=info\" && export MINIMAL_LOG_FORMAT=\"true\""
 
+# ANSI color codes
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+MAGENTA='\033[0;35m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+# Function to apply colors to text
+print_colored() {
+    local color=$1
+    local text=$2
+    echo -e "${color}${text}${NC}"
+}
+
+# Function to check and kill zombie nockchain processes
+kill_zombie_processes() {
+    local instance_id=$1
+    local process_name="nock-$instance_id"
+    
+    # Collect all PIDs for the process (there could be multiple instances or child processes)
+    local pids=($(pgrep -f "$process_name" || echo ""))
+    
+    if [ ${#pids[@]} -gt 0 ] && [ -n "${pids[0]}" ]; then
+        print_colored "$YELLOW" "🔍 Zombie process(es) for $process_name detected after screen session ended."
+        print_colored "$YELLOW" "Found ${#pids[@]} process(es) to terminate."
+        
+        # Try graceful termination first (SIGTERM)
+        print_colored "$YELLOW" "🛑 Attempting graceful termination with SIGTERM..."
+        for pid in "${pids[@]}"; do
+            print_colored "$CYAN" "Sending SIGTERM to process $pid..."
+            kill -15 "$pid" 2>/dev/null || true
+        done
+        
+        # Wait a moment for processes to terminate
+        sleep 2
+        
+        # Check if processes still exist and try SIGINT (like Ctrl+C)
+        pids=($(pgrep -f "$process_name" || echo ""))
+        if [ ${#pids[@]} -gt 0 ] && [ -n "${pids[0]}" ]; then
+            print_colored "$YELLOW" "⚠️ Processes still running. Trying SIGINT (Ctrl+C)..."
+            for pid in "${pids[@]}"; do
+                print_colored "$CYAN" "Sending SIGINT to process $pid..."
+                kill -2 "$pid" 2>/dev/null || true
+            done
+            
+            # Wait again
+            sleep 2
+            
+            # If still running, use force kill (SIGKILL)
+            pids=($(pgrep -f "$process_name" || echo ""))
+            if [ ${#pids[@]} -gt 0 ] && [ -n "${pids[0]}" ]; then
+                print_colored "$RED" "⚠️ Processes still running. Forcing termination with SIGKILL..."
+                for pid in "${pids[@]}"; do
+                    print_colored "$RED" "Sending SIGKILL to process $pid..."
+                    kill -9 "$pid" 2>/dev/null || true
+                done
+                
+                # One final check
+                sleep 1
+                pids=($(pgrep -f "$process_name" || echo ""))
+                if [ ${#pids[@]} -gt 0 ] && [ -n "${pids[0]}" ]; then
+                    print_colored "$RED" "❌ WARNING: Failed to terminate some processes for $process_name!"
+                    print_colored "$RED" "PIDs still running: ${pids[*]}"
+                    print_colored "$YELLOW" "You may need to manually terminate these processes with 'sudo kill -9 ${pids[*]}'"
+                    return 1
+                fi
+            fi
+        fi
+        
+        # Check if any child processes with similar names remain
+        local child_pids=($(ps aux | grep -i "[n]ock" | grep -i "$instance_id" | awk '{print $2}' || echo ""))
+        if [ ${#child_pids[@]} -gt 0 ] && [ -n "${child_pids[0]}" ]; then
+            print_colored "$YELLOW" "Found ${#child_pids[@]} related child processes. Terminating..."
+            for pid in "${child_pids[@]}"; do
+                print_colored "$CYAN" "Killing child process $pid..."
+                kill -9 "$pid" 2>/dev/null || true
+            done
+        fi
+        
+        print_colored "$GREEN" "✅ Process cleanup for $process_name completed."
+        
+        # Check memory and clean up any leaked memory
+        if command_exists sync; then
+            sync
+            if [[ "$(detect_os)" == "linux" ]] && [ -w /proc/sys/vm/drop_caches ]; then
+                print_colored "$CYAN" "🧹 Cleaning up system memory cache..."
+                sudo sh -c "echo 1 > /proc/sys/vm/drop_caches" 2>/dev/null || true
+            fi
+        fi
+    fi
+}
+
+# Function to clean up all zombie nockchain processes
+cleanup_all_zombies() {
+    print_colored "$YELLOW" "🔍 Searching for all zombie nockchain processes..."
+    
+    # First look for numbered instances
+    local instance_pids=($(ps aux | grep -i "[n]ock-[0-9]" | awk '{print $2}' || echo ""))
+    
+    # Check if any of these don't have associated screen sessions
+    if [ ${#instance_pids[@]} -gt 0 ] && [ -n "${instance_pids[0]}" ]; then
+        for pid in "${instance_pids[@]}"; do
+            local process=$(ps -p "$pid" -o comm= | grep -o "nock-[0-9]\+" || echo "")
+            
+            if [ -n "$process" ] && ! screen -list | grep -q "$process"; then
+                print_colored "$RED" "⚠️ Found zombie process: $process (PID: $pid) with no screen session"
+                
+                # Extract the instance id
+                if [[ $process =~ nock-([0-9]+) ]]; then
+                    local instance_id="${BASH_REMATCH[1]}"
+                    kill_zombie_processes "$instance_id"
+                else
+                    # If we can't extract an ID, just kill the process directly
+                    print_colored "$RED" "Killing process $pid directly..."
+                    kill -9 "$pid" 2>/dev/null || true
+                fi
+            fi
+        done
+    fi
+    
+    # Look for main nockchain process without screen
+    if pgrep -f "nockchain" > /dev/null && ! screen -list | grep -q "nock[[:space:]]"; then
+        print_colored "$RED" "⚠️ Found main nockchain process with no screen session"
+        
+        local main_pids=($(pgrep -f "nockchain" | grep -v "nock-" || echo ""))
+        if [ ${#main_pids[@]} -gt 0 ] && [ -n "${main_pids[0]}" ]; then
+            print_colored "$YELLOW" "Terminating ${#main_pids[@]} main nockchain processes..."
+            
+            # Try graceful termination first
+            for pid in "${main_pids[@]}"; do
+                print_colored "$CYAN" "Sending SIGTERM to process $pid..."
+                kill -15 "$pid" 2>/dev/null || true
+            done
+            
+            sleep 2
+            
+            # If still running, force kill
+            main_pids=($(pgrep -f "nockchain" | grep -v "nock-" || echo ""))
+            if [ ${#main_pids[@]} -gt 0 ] && [ -n "${main_pids[0]}" ]; then
+                for pid in "${main_pids[@]}"; do
+                    print_colored "$RED" "Forcing termination of process $pid..."
+                    kill -9 "$pid" 2>/dev/null || true
+                done
+            fi
+        fi
+    fi
+    
+    # Final check for any remaining nockchain processes
+    if pgrep -f "nock" > /dev/null; then
+        print_colored "$YELLOW" "Some nockchain processes may still be running."
+        print_colored "$YELLOW" "Run 'ps aux | grep nock' to check, or 'pkill -9 -f nock' to force terminate all."
+    else
+        print_colored "$GREEN" "✅ All zombie nockchain processes have been terminated."
+    fi
+}
+
 # Function to check if command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
@@ -31,7 +190,8 @@ command_exists() {
 
 # Function to prompt for user confirmation
 confirm() {
-    read -p "$1 [Y/n] " response
+    print_colored "$YELLOW" "$1 [Y/n] "
+    read -p "" response
     case "$response" in
         [nN][oO]|[nN]) 
             return 1
@@ -57,77 +217,77 @@ check_dependencies() {
         if ! command_exists "$dep"; then
             missing_deps+=("$dep")
         else
-            echo "✅ $dep is already installed."
+            print_colored "$GREEN" "✅ $dep is already installed."
         fi
     done
     
     # Check for screen on Linux and macOS
     if ! command_exists screen; then
-        echo "screen is required but not installed."
+        print_colored "$YELLOW" "screen is required but not installed."
         if confirm "Would you like to install screen?"; then
             if [[ "$os" == "macos" ]]; then
-                echo "Installing screen using Homebrew..."
+                print_colored "$CYAN" "Installing screen using Homebrew..."
                 brew install screen
             elif [[ "$os" == "linux" ]]; then
-                echo "Installing screen using system package manager..."
+                print_colored "$CYAN" "Installing screen using system package manager..."
                 if command_exists apt-get; then
                     sudo apt-get update
                     sudo apt-get install -y screen
                 elif command_exists yum; then
                     sudo yum install -y screen
                 else
-                    echo "Cannot automatically install screen. Please install it manually and try again."
+                    print_colored "$RED" "Cannot automatically install screen. Please install it manually and try again."
                     return 1
                 fi
             fi
-            echo "✅ screen installed successfully."
+            print_colored "$GREEN" "✅ screen installed successfully."
         else
-            echo "Screen installation skipped. Cannot run nockchain in background without screen."
+            print_colored "$YELLOW" "Screen installation skipped. Cannot run nockchain in background without screen."
             return 1
         fi
     else
-        echo "✅ screen is already installed."
+        print_colored "$GREEN" "✅ screen is already installed."
     fi
     
     # If all dependencies are installed
     if [ ${#missing_deps[@]} -eq 0 ]; then
-        echo "All dependencies are installed."
+        print_colored "$GREEN" "All dependencies are installed."
         return 0
     fi
     
     # Ask user to install missing dependencies
-    echo "The following dependencies are missing: ${missing_deps[*]}"
+    print_colored "$YELLOW" "The following dependencies are missing: ${missing_deps[*]}"
     if ! confirm "Would you like to install them?"; then
-        echo "Dependencies installation skipped. Some features may not work properly."
+        print_colored "$YELLOW" "Dependencies installation skipped. Some features may not work properly."
         return 1
     fi
     
     # Install missing dependencies based on OS
     if [[ "$os" == "macos" ]]; then
         if ! command_exists brew; then
-            echo "Homebrew is required but was not found."
+            print_colored "$YELLOW" "Homebrew is required but was not found."
             if confirm "Would you like to install Homebrew?"; then
                 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
             else
-                echo "Homebrew installation skipped. Cannot install dependencies without Homebrew."
+                print_colored "$YELLOW" "Homebrew installation skipped. Cannot install dependencies without Homebrew."
                 return 1
             fi
         fi
         
         for dep in "${missing_deps[@]}"; do
-            echo "Installing $dep using Homebrew..."
+            print_colored "$CYAN" "Installing $dep using Homebrew..."
             brew install "$dep"
         done
     elif [[ "$os" == "linux" ]]; then
         if command_exists apt-get; then
-            echo "Installing dependencies using apt-get..."
+            print_colored "$CYAN" "Installing dependencies using apt-get..."
             sudo apt-get update
             sudo apt-get install -y "${missing_deps[@]}"
         elif command_exists yum; then
-            echo "Installing dependencies using yum..."
+            print_colored "$CYAN" "Installing dependencies using yum..."
             sudo yum install -y "${missing_deps[@]}"
         else
-            echo "Cannot automatically install dependencies. Please install them manually and try again."
+            print_colored "$RED" "Cannot automatically install dependencies. Please install them manually and try again."
             return 1
         fi
     fi
@@ -138,16 +298,16 @@ check_dependencies() {
         if ! command_exists "$dep"; then
             still_missing+=("$dep")
         else
-            echo "✅ $dep installed successfully."
+            print_colored "$GREEN" "✅ $dep installed successfully."
         fi
     done
     
     if [ ${#still_missing[@]} -eq 0 ]; then
-        echo "All dependencies installed successfully."
+        print_colored "$GREEN" "All dependencies installed successfully."
         return 0
     else
-        echo "The following dependencies could not be installed: ${still_missing[*]}"
-        echo "Please install them manually and try again."
+        print_colored "$RED" "The following dependencies could not be installed: ${still_missing[*]}"
+        print_colored "$YELLOW" "Please install them manually and try again."
         return 1
     fi
 }
@@ -264,15 +424,15 @@ detect_shell() {
 # Get miner status
 get_miner_status() {
     if ! command_exists screen; then
-        echo "📛 Screen not installed"
+        print_colored "$RED" "📛 Screen not installed"
         return
     fi
     
     # Check for single miner instance
     if screen -list | grep -q "nock$"; then
-        echo "✅ Default miner is RUNNING in screen session 'nock'"
+        print_colored "$GREEN" "✅ Default miner is RUNNING in screen session 'nock'"
     else
-        echo "❌ Default miner is NOT running"
+        print_colored "$RED" "❌ Default miner is NOT running"
     fi
     
     # Check for batch instances
@@ -289,7 +449,26 @@ get_miner_status() {
     if [ $batch_count -gt 0 ]; then
         # Remove trailing comma and space
         batch_list=${batch_list%, }
-        echo "✅ $batch_count batch miner instances RUNNING: $batch_list"
+        print_colored "$GREEN" "✅ $batch_count batch miner instances RUNNING: $batch_list"
+    fi
+    
+    # Check for zombie processes (nock-N processes without matching screen sessions)
+    local zombie_count=0
+    local zombie_list=""
+    
+    for proc in $(pgrep -f "nock-[0-9]+" | sort); do
+        local proc_name=$(ps -p "$proc" -o comm= | grep -o "nock-[0-9]\+")
+        if [[ -n "$proc_name" ]] && ! screen -list | grep -q "$proc_name"; then
+            zombie_count=$((zombie_count+1))
+            zombie_list="${zombie_list}${proc_name}(PID:$proc), "
+        fi
+    done
+    
+    if [ $zombie_count -gt 0 ]; then
+        # Remove trailing comma and space
+        zombie_list=${zombie_list%, }
+        print_colored "$RED" "⚠️ $zombie_count zombie miner processes detected: $zombie_list"
+        print_colored "$YELLOW" "   Run 'nockhelper list' to manage these processes."
     fi
 }
 
@@ -521,7 +700,7 @@ delete_nockchain_instances() {
     echo "╚═════════════════════════════════════════════════════════════════╝"
     
     if [ "$instance_id" = "all" ]; then
-        echo "Deleting all nockchain instance directories..."
+        print_colored "$YELLOW" "Deleting all nockchain instance directories..."
         
         # Check if any instance directories exist
         local count=0
@@ -532,13 +711,13 @@ delete_nockchain_instances() {
         done
         
         if [ $count -eq 0 ]; then
-            echo "❌ No nockchain instance directories found."
+            print_colored "$RED" "❌ No nockchain instance directories found."
             return 1
         fi
         
         # Confirm deletion of all instances
         if ! confirm "Are you sure you want to delete all $count nockchain instance directories?"; then
-            echo "Deletion cancelled."
+            print_colored "$BLUE" "Deletion cancelled."
             return 0
         fi
         
@@ -547,12 +726,16 @@ delete_nockchain_instances() {
             while read -r line; do
                 if [[ $line =~ nock-([0-9]+) ]]; then
                     local session="nock-${BASH_REMATCH[1]}"
-                    echo "Stopping screen session $session..."
+                    local instance_num="${BASH_REMATCH[1]}"
+                    print_colored "$YELLOW" "Stopping screen session $session..."
                     # First try to gracefully terminate the nockchain process
                     screen -S "$session" -X stuff $'\003'  # Send Ctrl+C
                     sleep 1
                     # Then quit the screen session
                     screen -S "$session" -X quit 2>/dev/null || true
+                    
+                    # Kill any zombie processes
+                    kill_zombie_processes "$instance_num"
                 fi
             done < <(screen -list | grep -o "nock-[0-9]\+")
         fi
@@ -560,70 +743,75 @@ delete_nockchain_instances() {
         # Delete all instance directories
         for dir in "$INSTALL_DIR"/nock-*; do
             if [ -d "$dir" ]; then
-                echo "Removing $dir..."
+                print_colored "$YELLOW" "Removing $dir..."
                 rm -rf "$dir"
             fi
         done
         
-        echo "✅ All nockchain instance directories have been deleted."
+        print_colored "$GREEN" "✅ All nockchain instance directories have been deleted."
     else
         # Check if instance_id includes "nock-" prefix
         local screen_name=""
         local instance_dir=""
+        local instance_num=""
         
         if [[ "$instance_id" == nock-* ]]; then
             # Format is nock-N
             screen_name="$instance_id"
-            instance_num=${instance_id#nock-}
+            instance_num="${BASH_REMATCH[1]}"
             instance_dir="$INSTALL_DIR/$instance_id"
         elif [[ "$instance_id" =~ ^[0-9]+$ ]]; then
             # Format is just N
+            instance_num="$instance_id"
             screen_name="nock-$instance_id"
             instance_dir="$INSTALL_DIR/$screen_name"
         else
-            echo "❌ Invalid instance ID format. Use 'nock-N', 'N', or 'all'."
+            print_colored "$RED" "❌ Invalid instance ID format. Use 'nock-N', 'N', or 'all'."
             return 1
         fi
         
         if [ ! -d "$instance_dir" ]; then
-            echo "❌ Nockchain instance directory not found: $instance_dir"
+            print_colored "$RED" "❌ Nockchain instance directory not found: $instance_dir"
             return 1
         fi
         
         # Confirm deletion of specific instance
         if ! confirm "Are you sure you want to delete nockchain instance $screen_name?"; then
-            echo "Deletion cancelled."
+            print_colored "$BLUE" "Deletion cancelled."
             return 0
         fi
         
         # Stop the running instance first
         if command_exists screen; then
             if screen -list | grep -q "$screen_name"; then
-                echo "Stopping screen session $screen_name..."
+                print_colored "$YELLOW" "Stopping screen session $screen_name..."
                 
                 # First try to gracefully terminate the nockchain process with Ctrl+C
-                echo "Sending termination signal to nockchain process..."
+                print_colored "$YELLOW" "Sending termination signal to nockchain process..."
                 screen -S "$screen_name" -X stuff $'\003'  # Send Ctrl+C
                 
                 # Give it a moment to shut down
                 sleep 2
                 
                 # Now quit the screen session
-                echo "Terminating screen session..."
+                print_colored "$YELLOW" "Terminating screen session..."
                 screen -S "$screen_name" -X quit 2>/dev/null || true
+                
+                # Kill any zombie processes
+                kill_zombie_processes "$instance_num"
                 
                 # Wait a bit to ensure the screen session is fully terminated
                 sleep 1
             else
-                echo "No running screen session found for $screen_name."
+                print_colored "$YELLOW" "No running screen session found for $screen_name."
             fi
         fi
         
         # Delete instance directory
-        echo "Removing $instance_dir..."
+        print_colored "$YELLOW" "Removing $instance_dir..."
         rm -rf "$instance_dir"
         
-        echo "✅ Nockchain instance $screen_name has been deleted."
+        print_colored "$GREEN" "✅ Nockchain instance $screen_name has been deleted."
     fi
     
     return 0
@@ -636,7 +824,7 @@ list_screen_sessions() {
     echo "╚═════════════════════════════════════════════════════════════════╝"
     
     if ! command_exists screen; then
-        echo "❌ screen is not installed."
+        print_colored "$RED" "❌ screen is not installed."
         return 1
     fi
     
@@ -660,23 +848,23 @@ list_screen_sessions() {
     
     # Display sessions
     if [ ${#sessions[@]} -eq 0 ]; then
-        echo "No nockchain screen sessions found."
+        print_colored "$YELLOW" "No nockchain screen sessions found."
         return 0
     fi
     
-    echo "Found ${#sessions[@]} nockchain screen sessions:"
+    print_colored "$GREEN" "Found ${#sessions[@]} nockchain screen sessions:"
     echo ""
     
     for ((i=0; i<${#sessions[@]}; i++)); do
-        echo "  [$((i+1))] ${sessions[$i]}"
+        print_colored "$CYAN" "  [${BOLD}$((i+1))${NC}${CYAN}] ${sessions[$i]}"
     done
     
     echo ""
-    echo "What would you like to do?"
-    echo "  [a] Attach to a session"
-    echo "  [k] Kill (stop) a session"
-    echo "  [v] View session logs"
-    echo "  [q] Quit this menu"
+    print_colored "$MAGENTA" "What would you like to do?"
+    print_colored "$CYAN" "  [${BOLD}a${NC}${CYAN}] Attach to a session"
+    print_colored "$CYAN" "  [${BOLD}k${NC}${CYAN}] Kill (stop) a session"
+    print_colored "$CYAN" "  [${BOLD}v${NC}${CYAN}] View session logs"
+    print_colored "$CYAN" "  [${BOLD}q${NC}${CYAN}] Quit this menu"
     
     read -p "Enter your choice [a/k/v/q]: " choice
     
@@ -684,46 +872,53 @@ list_screen_sessions() {
         a|A)
             read -p "Enter session number to attach to: " session_num
             if [[ "$session_num" =~ ^[0-9]+$ ]] && [ "$session_num" -gt 0 ] && [ "$session_num" -le ${#sessions[@]} ]; then
-                echo "Attaching to session ${sessions[$((session_num-1))]}..."
+                print_colored "$GREEN" "Attaching to session ${sessions[$((session_num-1))]}..."
                 exec screen -r "${sessions[$((session_num-1))]}"
             else
-                echo "❌ Invalid session number."
+                print_colored "$RED" "❌ Invalid session number."
             fi
             ;;
         k|K)
             read -p "Enter session number to kill: " session_num
             if [[ "$session_num" =~ ^[0-9]+$ ]] && [ "$session_num" -gt 0 ] && [ "$session_num" -le ${#sessions[@]} ]; then
-                echo "Killing session ${sessions[$((session_num-1))]}..."
+                print_colored "$YELLOW" "Killing session ${sessions[$((session_num-1))]}..."
                 # First try to gracefully terminate the nockchain process
                 screen -S "${sessions[$((session_num-1))]}" -X stuff $'\003'  # Send Ctrl+C
                 sleep 1
                 # Then quit the screen session
                 screen -S "${sessions[$((session_num-1))]}" -X quit 2>/dev/null || true
-                echo "✅ Session terminated."
+                
+                # Check if it's a batch instance and kill any zombie processes
+                if [[ "${sessions[$((session_num-1))]}" =~ nock-([0-9]+) ]]; then
+                    local instance_id="${BASH_REMATCH[1]}"
+                    kill_zombie_processes "$instance_id"
+                fi
+                
+                print_colored "$GREEN" "✅ Session terminated."
             else
-                echo "❌ Invalid session number."
+                print_colored "$RED" "❌ Invalid session number."
             fi
             ;;
         v|V)
             read -p "Enter session number to view logs: " session_num
             if [[ "$session_num" =~ ^[0-9]+$ ]] && [ "$session_num" -gt 0 ] && [ "$session_num" -le ${#sessions[@]} ]; then
-                echo "Viewing logs for session ${sessions[$((session_num-1))]}..."
+                print_colored "$GREEN" "Viewing logs for session ${sessions[$((session_num-1))]}..."
                 screen -S "${sessions[$((session_num-1))]}" -X hardcopy "/tmp/nockchain_screen_log"
                 if [ -f "/tmp/nockchain_screen_log" ]; then
                     less "/tmp/nockchain_screen_log"
                     rm "/tmp/nockchain_screen_log"
                 else
-                    echo "❌ Failed to capture logs."
+                    print_colored "$RED" "❌ Failed to capture logs."
                 fi
             else
-                echo "❌ Invalid session number."
+                print_colored "$RED" "❌ Invalid session number."
             fi
             ;;
         q|Q)
-            echo "Exiting menu."
+            print_colored "$BLUE" "Exiting menu."
             ;;
         *)
-            echo "❌ Invalid choice."
+            print_colored "$RED" "❌ Invalid choice."
             ;;
     esac
     
@@ -736,123 +931,138 @@ display_help() {
     echo "║                      NOCKCHAIN HELPER TOOL                      ║"
     echo "╚═════════════════════════════════════════════════════════════════╝"
     echo ""
-    echo "CURRENT STATUS:"
-    echo "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
-    echo "📂 Install Location: $INSTALL_DIR"
-    echo "🛠️ Nockhelper: $(get_installed_nockhelper_version)"
+    print_colored "$MAGENTA" "CURRENT STATUS:"
+    print_colored "$MAGENTA" "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
+    print_colored "$CYAN" "📂 Install Location: $INSTALL_DIR"
+    print_colored "$CYAN" "🛠️ Nockhelper: $(get_installed_nockhelper_version)"
     
     # Skip update check when displaying help to avoid GitHub API rate limits
-    echo "🔄 Nockhelper Update Status: Use 'nockhelper check' to check for updates"
+    print_colored "$CYAN" "🔄 Nockhelper Update Status: Use 'nockhelper check' to check for updates"
     
     if [ -x "$INSTALL_DIR/nockchain" ]; then
-        echo "📦 Nockchain: Installed ($(get_installed_nockchain_version))"
-        echo "🔄 Nockchain Update Status: Use 'nockhelper check' to check for updates"
+        print_colored "$GREEN" "📦 Nockchain: Installed ($(get_installed_nockchain_version))"
+        print_colored "$CYAN" "🔄 Nockchain Update Status: Use 'nockhelper check' to check for updates"
     else
-        echo "📦 Nockchain: Not installed"
+        print_colored "$RED" "📦 Nockchain: Not installed"
     fi
     get_miner_status
     echo ""
     echo ""
     
-    echo "COMMANDS:"
-    echo "⎯⎯⎯⎯⎯⎯⎯⎯⎯"
-    echo "  install    - Install nockchain binaries"
-    echo "               Usage: nockhelper install"
+    print_colored "$MAGENTA" "COMMANDS:"
+    print_colored "$MAGENTA" "⎯⎯⎯⎯⎯⎯⎯⎯⎯"
+    print_colored "$YELLOW" "  ${BOLD}install${NC}    - Install nockchain binaries"
+    print_colored "$CYAN" "               Usage: nockhelper install"
     echo ""
-    echo "  update     - Update nockchain binaries and helper script"
-    echo "               Usage: nockhelper update"
+    print_colored "$YELLOW" "  ${BOLD}update${NC}     - Update nockchain binaries and helper script"
+    print_colored "$CYAN" "               Usage: nockhelper update"
     echo ""
-    echo "  update-nockchain - Update nockchain binaries"
-    echo "               Usage: nockhelper update-nockchain"
+    print_colored "$YELLOW" "  ${BOLD}update-nockchain${NC} - Update nockchain binaries"
+    print_colored "$CYAN" "               Usage: nockhelper update-nockchain"
     echo ""
-    echo "  update-nockhelper - Update nockhelper script"
-    echo "               Usage: nockhelper update-nockhelper"
+    print_colored "$YELLOW" "  ${BOLD}update-nockhelper${NC} - Update nockhelper script"
+    print_colored "$CYAN" "               Usage: nockhelper update-nockhelper"
     echo ""
-    echo "  download   - Download/update nockchain binaries from latest release"
-    echo "               Usage: nockhelper download"
+    print_colored "$YELLOW" "  ${BOLD}download${NC}   - Download/update nockchain binaries from latest release"
+    print_colored "$CYAN" "               Usage: nockhelper download"
     echo ""
-    echo "  check      - Check for nockchain updates"
-    echo "               Usage: nockhelper check"
+    print_colored "$YELLOW" "  ${BOLD}check${NC}      - Check for nockchain updates"
+    print_colored "$CYAN" "               Usage: nockhelper check"
     echo ""
-    echo "  run        - Run nockchain miner in a screen session"
-    echo "               Usage: nockhelper run"
+    print_colored "$YELLOW" "  ${BOLD}run${NC}        - Run nockchain miner in a screen session"
+    print_colored "$CYAN" "               Usage: nockhelper run"
     echo ""
-    echo "  run <N>    - Run N instances of nockchain miners in separate screen sessions"
-    echo "               Usage: nockhelper run 10"
+    print_colored "$YELLOW" "  ${BOLD}run <N>${NC}    - Run N instances of nockchain miners in separate screen sessions"
+    print_colored "$CYAN" "               Usage: nockhelper run 10"
     echo ""
-    echo "  list       - List and manage nockchain screen sessions"
-    echo "               Usage: nockhelper list"
+    print_colored "$YELLOW" "  ${BOLD}list${NC}       - List and manage nockchain screen sessions"
+    print_colored "$CYAN" "               Usage: nockhelper list"
     echo ""
-    echo "  del <id>   - Delete a specific nockchain instance directory"
-    echo "               Usage: nockhelper del 1"
+    print_colored "$YELLOW" "  ${BOLD}cleanup${NC}    - Clean up all zombie nockchain processes"
+    print_colored "$CYAN" "               Usage: nockhelper cleanup"
     echo ""
-    echo "  del all    - Delete all nockchain instance directories"
-    echo "               Usage: nockhelper del all"
+    print_colored "$YELLOW" "  ${BOLD}del <id>${NC}   - Delete a specific nockchain instance directory"
+    print_colored "$CYAN" "               Usage: nockhelper del 1"
     echo ""
-    echo "  uninstall  - Remove nockchain installation"
-    echo "               Usage: nockhelper uninstall"
+    print_colored "$YELLOW" "  ${BOLD}del all${NC}    - Delete all nockchain instance directories"
+    print_colored "$CYAN" "               Usage: nockhelper del all"
     echo ""
-    echo "  status     - Check miner status"
-    echo "               Usage: nockhelper status"
+    print_colored "$YELLOW" "  ${BOLD}uninstall${NC}  - Remove nockchain installation"
+    print_colored "$CYAN" "               Usage: nockhelper uninstall"
     echo ""
-    echo "  help       - Display this help message"
-    echo "               Usage: nockhelper help"
+    print_colored "$YELLOW" "  ${BOLD}status${NC}     - Check miner status"
+    print_colored "$CYAN" "               Usage: nockhelper status"
     echo ""
-    
-    echo "SCREEN MANAGEMENT:"
-    echo "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
-    echo "  To attach to running miner:  screen -r nock"
-    echo "  To detach from session:      Press Ctrl+A, then D"
-    echo "  To stop the miner:           screen -S nock -X quit"
+    print_colored "$YELLOW" "  ${BOLD}help${NC}       - Display this help message"
+    print_colored "$CYAN" "               Usage: nockhelper help"
     echo ""
     
-    echo "ENVIRONMENT:"
-    echo "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
-    echo "  Operating System: $(detect_os)"
-    echo "  Architecture:     $(detect_arch)"
-    echo "  Preferred Shell:  $(detect_shell)"
+    print_colored "$MAGENTA" "SCREEN MANAGEMENT:"
+    print_colored "$MAGENTA" "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
+    print_colored "$CYAN" "  To attach to running miner:  ${BOLD}screen -r nock${NC}"
+    print_colored "$CYAN" "  To detach from session:      Press ${BOLD}Ctrl+A${NC}, then ${BOLD}D${NC}"
+    print_colored "$CYAN" "  To stop the miner:           ${BOLD}screen -S nock -X quit${NC}"
     echo ""
     
-    echo "For more information, visit: https://github.com/sarkrui/nockchain-auto"
+    print_colored "$MAGENTA" "ENVIRONMENT:"
+    print_colored "$MAGENTA" "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
+    print_colored "$CYAN" "  Operating System: $(detect_os)"
+    print_colored "$CYAN" "  Architecture:     $(detect_arch)"
+    print_colored "$CYAN" "  Preferred Shell:  $(detect_shell)"
+    echo ""
+    
+    print_colored "$GREEN" "For more information, visit: https://github.com/sarkrui/nockchain-auto"
 }
 
-# Check miner status
+# Check status
 check_status() {
     # Check dependencies first
     check_dependencies
     
-    echo "Nockchain Status:"
-    echo "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
+    echo "╔═════════════════════════════════════════════════════════════════╗"
+    echo "║                        NOCKCHAIN STATUS                         ║"
+    echo "╚═════════════════════════════════════════════════════════════════╝"
     
-    echo "🛠️ Nockhelper version: $(get_installed_nockhelper_version)"
+    print_colored "$CYAN" "🛠️ Nockhelper version: $(get_installed_nockhelper_version)"
     
     if [ -d "$INSTALL_DIR" ]; then
-        echo "📂 Installation directory: $INSTALL_DIR (exists)"
+        print_colored "$GREEN" "📂 Installation directory: $INSTALL_DIR (exists)"
     else
-        echo "📂 Installation directory: $INSTALL_DIR (missing)"
+        print_colored "$RED" "📂 Installation directory: $INSTALL_DIR (missing)"
     fi
     
     if [ -x "$INSTALL_DIR/nockchain" ]; then
-        echo "📦 Nockchain binary: Found and executable"
-        echo "📦 Nockchain version: $(get_installed_nockchain_version)"
+        print_colored "$GREEN" "📦 Nockchain binary: Found and executable"
+        print_colored "$CYAN" "📦 Nockchain version: $(get_installed_nockchain_version)"
         check_for_nockchain_updates
     else
-        echo "📦 Nockchain binary: Not found or not executable"
+        print_colored "$RED" "📦 Nockchain binary: Not found or not executable"
     fi
     
     get_miner_status
+    
+    # Check for zombie processes not associated with any screen session
+    local zombie_procs=$(pgrep -f "nock-[0-9]+" | wc -l)
+    local screen_sessions=$(screen -list 2>/dev/null | grep -c "nock-[0-9]\+")
+    
+    # If there are more processes than screen sessions, we have zombies
+    if [ "$zombie_procs" -gt "$screen_sessions" ] && [ "$zombie_procs" -gt 0 ]; then
+        print_colored "$RED" "⚠️ Detected potential zombie nockchain processes!"
+        print_colored "$YELLOW" "   Run 'ps aux | grep nock-' to see them"
+        print_colored "$YELLOW" "   Use 'nockhelper cleanup' to terminate all zombie processes"
+    fi
     
     # Check for batch miner instances directories
     if [ -d "$INSTALL_DIR" ]; then
         local batch_dirs=0
         for dir in "$INSTALL_DIR"/nock-*; do
-            if [ -d "$dir" ] && [ -x "$dir/nockchain" ]; then
+            if [ -d "$dir" ] && [ -x "$dir/nock-"* ]; then
                 batch_dirs=$((batch_dirs+1))
             fi
         done
         
         if [ $batch_dirs -gt 0 ]; then
-            echo "📦 Batch miner instance directories found: $batch_dirs"
+            print_colored "$CYAN" "📦 Batch miner instance directories found: $batch_dirs"
         fi
     fi
     
@@ -860,9 +1070,9 @@ check_status() {
         # Commands for single instance
         if screen -list | grep -q "nock$"; then
             echo ""
-            echo "Default Miner Control Commands:"
-            echo "  Attach to miner: screen -r nock"
-            echo "  Stop miner:      screen -S nock -X quit"
+            print_colored "$MAGENTA" "Default Miner Control Commands:"
+            print_colored "$CYAN" "  Attach to miner: ${BOLD}screen -r nock${NC}"
+            print_colored "$CYAN" "  Stop miner:      ${BOLD}screen -S nock -X quit${NC}"
         fi
         
         # Commands for batch instances
@@ -875,11 +1085,11 @@ check_status() {
         
         if [ $batch_running -gt 0 ]; then
             echo ""
-            echo "Batch Miners Control Commands:"
-            echo "  List all sessions:      screen -ls"
-            echo "  Attach to miner #N:     screen -r nock-N"
-            echo "  Stop miner #N:          screen -S nock-N -X quit"
-            echo "  Stop all batch miners:  for i in \$(screen -ls | grep nock- | awk '{print \$1}'); do screen -S \$i -X quit; done"
+            print_colored "$MAGENTA" "Batch Miners Control Commands:"
+            print_colored "$CYAN" "  List all sessions:      ${BOLD}screen -ls${NC}"
+            print_colored "$CYAN" "  Attach to miner #N:     ${BOLD}screen -r nock-N${NC}"
+            print_colored "$CYAN" "  Stop miner #N:          ${BOLD}screen -S nock-N -X quit${NC}"
+            print_colored "$CYAN" "  Stop all batch miners:  ${BOLD}for i in \$(screen -ls | grep nock- | awk '{print \$1}'); do screen -S \$i -X quit; done${NC}"
         fi
     fi
 }
@@ -1187,26 +1397,26 @@ run_nockchain() {
     echo "╚═════════════════════════════════════════════════════════════════╝"
     
     if ! command_exists screen; then
-        echo "❌ screen is not installed. Cannot run nockchain in the background."
+        print_colored "$RED" "❌ screen is not installed. Cannot run nockchain in the background."
         return 1
     fi
     
     # Check if there's already a nockchain screen session
     if screen -list | grep -q "nock"; then
-        echo "ℹ️ nockchain is already running in a screen session."
-        echo "   To attach to it, run: screen -r nock"
-        echo "   To kill it, run: screen -S nock -X quit"
+        print_colored "$YELLOW" "ℹ️ nockchain is already running in a screen session."
+        print_colored "$CYAN" "   To attach to it, run: screen -r nock"
+        print_colored "$CYAN" "   To kill it, run: screen -S nock -X quit"
         return 0
     fi
     
     # Make sure nockchain is installed
     if [ ! -x "$INSTALL_DIR/nockchain" ]; then
-        echo "❌ nockchain binary not found or not executable."
-        echo "   Please run 'nockhelper install' first."
+        print_colored "$RED" "❌ nockchain binary not found or not executable."
+        print_colored "$YELLOW" "   Please run 'nockhelper install' first."
         return 1
     fi
     
-    echo "Starting nockchain miner in a screen session..."
+    print_colored "$CYAN" "Starting nockchain miner in a screen session..."
     
     # Detect preferred shell
     local shell=$(detect_shell)
@@ -1214,19 +1424,100 @@ run_nockchain() {
     # For Linux, set vm.overcommit_memory=1
     local os=$(detect_os)
     if [[ "$os" == "linux" ]]; then
-        echo "Setting vm.overcommit_memory=1 for Linux..."
+        print_colored "$YELLOW" "Setting vm.overcommit_memory=1 for Linux..."
         sudo sysctl -w vm.overcommit_memory=1
     fi
     
-    # Create the screen session with the preferred shell
-    screen -dmS nock $shell -c "cd $INSTALL_DIR && rm -rf ./.data.nockchain .socket/nockchain_npc.sock && ./nockchain --mining-pubkey $MINING_PUBKEY --mine --peer /ip4/95.216.102.60/udp/3006/quic-v1 --peer /ip4/65.108.123.225/udp/3006/quic-v1 --peer /ip4/65.109.156.108/udp/3006/quic-v1 --peer /ip4/65.21.67.175/udp/3006/quic-v1 --peer /ip4/65.109.156.172/udp/3006/quic-v1 --peer /ip4/34.174.22.166/udp/3006/quic-v1 --peer /ip4/34.95.155.151/udp/30000/quic-v1 --peer /ip4/34.18.98.38/udp/30000/quic-v1; exec $shell"
+    # Create a wrapper script to handle cleanup when the screen session ends
+    local wrapper_script="$INSTALL_DIR/start_nockchain.sh"
     
-    echo "✅ Nockchain miner is now running in a screen session named 'nock'"
+    cat > "$wrapper_script" << EOF
+#!/bin/bash
+# Wrapper script for main nockchain instance
+
+# Store process IDs
+export MAIN_PID=\$$
+echo "\$MAIN_PID" > "$INSTALL_DIR/.nockchain_main_pid"
+
+# Function to clean up when the script exits
+cleanup() {
+    echo "Cleaning up nockchain process..."
+    
+    # Get all child processes
+    local children=\$(pgrep -P \$MAIN_PID 2>/dev/null || echo "")
+    local grandchildren=""
+    
+    # For each child, get its children too
+    for child in \$children; do
+        local child_procs=\$(pgrep -P \$child 2>/dev/null || echo "")
+        if [ -n "\$child_procs" ]; then
+            grandchildren="\$grandchildren \$child_procs"
+        fi
+    done
+    
+    # Combine all processes
+    local all_procs="\$children \$grandchildren"
+    
+    # Try graceful termination first
+    if [ -n "\$all_procs" ]; then
+        echo "Sending SIGTERM to child processes: \$all_procs"
+        kill -15 \$all_procs 2>/dev/null || true
+        sleep 2
+        
+        # Check if any processes still running
+        local still_running=""
+        for pid in \$all_procs; do
+            if kill -0 \$pid 2>/dev/null; then
+                still_running="\$still_running \$pid"
+            fi
+        done
+        
+        # If still running, force kill
+        if [ -n "\$still_running" ]; then
+            echo "Forcing termination of processes: \$still_running"
+            kill -9 \$still_running 2>/dev/null || true
+        fi
+    fi
+    
+    # Also look for any remaining nockchain process directly
+    local nock_procs=\$(pgrep -f "nockchain" | grep -v "\$MAIN_PID" || echo "")
+    if [ -n "\$nock_procs" ]; then
+        echo "Terminating nockchain processes: \$nock_procs"
+        kill -15 \$nock_procs 2>/dev/null || true
+        sleep 1
+        kill -9 \$nock_procs 2>/dev/null || true
+    fi
+    
+    # Clean up PID file
+    rm -f "$INSTALL_DIR/.nockchain_main_pid"
+    
+    echo "Cleanup completed."
+}
+
+# Cleanup when any signal is received
+trap cleanup EXIT SIGINT SIGTERM
+
+# Change to installation directory
+cd $INSTALL_DIR
+
+# Clean up any previous data
+rm -rf ./.data.nockchain .socket/nockchain_npc.sock
+
+# Start the nockchain process
+exec ./nockchain --mining-pubkey $MINING_PUBKEY --mine --peer /ip4/95.216.102.60/udp/3006/quic-v1 --peer /ip4/65.108.123.225/udp/3006/quic-v1 --peer /ip4/65.109.156.108/udp/3006/quic-v1 --peer /ip4/65.21.67.175/udp/3006/quic-v1 --peer /ip4/65.109.156.172/udp/3006/quic-v1 --peer /ip4/34.174.22.166/udp/3006/quic-v1 --peer /ip4/34.95.155.151/udp/30000/quic-v1 --peer /ip4/34.18.98.38/udp/30000/quic-v1
+EOF
+
+    chmod +x "$wrapper_script"
+    
+    # Create the screen session with the wrapper script
+    screen -dmS nock $shell -c "$wrapper_script; exec $shell"
+    
+    print_colored "$GREEN" "✅ Nockchain miner is now running in a screen session named 'nock'"
     echo ""
-    echo "💡 SCREEN SESSION COMMANDS:"
-    echo "   To attach to the session:  screen -r nock"
-    echo "   To detach from the session: Press Ctrl+A, then D"
-    echo "   To stop the miner:         screen -S nock -X quit"
+    print_colored "$CYAN" "💡 SCREEN SESSION COMMANDS:"
+    print_colored "$CYAN" "   To attach to the session:  screen -r nock"
+    print_colored "$CYAN" "   To detach from the session:      Press Ctrl+A, then D"
+    print_colored "$CYAN" "   To stop the miner:         screen -S nock -X quit"
     
     return 0
 }
@@ -1243,18 +1534,18 @@ run_batch_nockchain() {
     echo "╚═════════════════════════════════════════════════════════════════╝"
     
     if ! command_exists screen; then
-        echo "❌ screen is not installed. Cannot run nockchain in the background."
+        print_colored "$RED" "❌ screen is not installed. Cannot run nockchain in the background."
         return 1
     fi
     
     # Make sure nockchain is installed
     if [ ! -x "$INSTALL_DIR/nockchain" ]; then
-        echo "❌ nockchain binary not found or not executable."
-        echo "   Please run 'nockhelper install' first."
+        print_colored "$RED" "❌ nockchain binary not found or not executable."
+        print_colored "$YELLOW" "   Please run 'nockhelper install' first."
         return 1
     fi
     
-    echo "Starting $num_instances nockchain miner instances in separate screen sessions..."
+    print_colored "$CYAN" "Starting $num_instances nockchain miner instances in separate screen sessions..."
     
     # Detect preferred shell
     local shell=$(detect_shell)
@@ -1265,7 +1556,7 @@ run_batch_nockchain() {
     # For Linux, set vm.overcommit_memory=1
     local os=$(detect_os)
     if [[ "$os" == "linux" ]]; then
-        echo "Setting vm.overcommit_memory=1 for Linux..."
+        print_colored "$YELLOW" "Setting vm.overcommit_memory=1 for Linux..."
         sudo sysctl -w vm.overcommit_memory=1
     fi
     
@@ -1273,39 +1564,124 @@ run_batch_nockchain() {
     for ((i=1; i<=$num_instances; i++)); do
         local instance_dir="$INSTALL_DIR/nock-$i"
         local screen_name="nock-$i"
+        local binary_name="nock-$i"
         
         # Check if screen session already exists
         if screen -list | grep -q "$screen_name"; then
-            echo "ℹ️ nockchain instance $i is already running in screen session '$screen_name'"
+            print_colored "$YELLOW" "ℹ️ nockchain instance $i is already running in screen session '$screen_name'"
             continue
         fi
         
         # Create instance directory if it doesn't exist
         if [ ! -d "$instance_dir" ]; then
-            echo "Creating directory for instance $i: $instance_dir"
+            print_colored "$BLUE" "Creating directory for instance $i: $instance_dir"
             mkdir -p "$instance_dir"
         fi
         
-        # Copy nockchain binary to instance directory
-        echo "Copying nockchain binary to instance $i directory..."
-        cp "$INSTALL_DIR/nockchain" "$instance_dir/"
-        chmod +x "$instance_dir/nockchain"
+        # Copy nockchain binary to instance directory and rename it
+        print_colored "$BLUE" "Copying and renaming nockchain binary to $binary_name for instance $i..."
+        cp "$INSTALL_DIR/nockchain" "$instance_dir/$binary_name"
+        chmod +x "$instance_dir/$binary_name"
         
-        # Create screen session for this instance
-        echo "Starting nockchain instance $i in screen session '$screen_name'..."
-        screen -dmS "$screen_name" $shell -c "$env_vars && cd $instance_dir && rm -rf ./.data.nockchain .socket/nockchain_npc.sock && ./nockchain --mining-pubkey $MINING_PUBKEY --mine --peer /ip4/95.216.102.60/udp/3006/quic-v1 --peer /ip4/65.108.123.225/udp/3006/quic-v1 --peer /ip4/65.109.156.108/udp/3006/quic-v1 --peer /ip4/65.21.67.175/udp/3006/quic-v1 --peer /ip4/65.109.156.172/udp/3006/quic-v1 --peer /ip4/34.174.22.166/udp/3006/quic-v1 --peer /ip4/34.95.155.151/udp/30000/quic-v1 --peer /ip4/34.18.98.38/udp/30000/quic-v1 --peer /ip4/96.230.252.205/udp/3006/quic-v1 --peer /ip4/94.205.40.29/udp/3006/quic-v1 --peer /ip4/159.112.204.186/udp/3006/quic-v1 --peer /ip4/217.14.223.78/udp/3006/quic-v1; exec $shell"
+        # Create screen session for this instance with trap to ensure process cleanup
+        print_colored "$GREEN" "Starting nockchain instance $i in screen session '$screen_name'..."
         
-        echo "✅ Started nockchain instance $i in screen session '$screen_name'"
+        # Create a wrapper script to handle cleanup when the screen session ends
+        cat > "$instance_dir/start_nockchain.sh" << EOF
+#!/bin/bash
+# Wrapper script for nockchain instance $i
+
+# Store process IDs
+export MAIN_PID=\$$
+echo "\$MAIN_PID" > "$instance_dir/.nock_${i}_pid"
+
+# Function to clean up when the script exits
+cleanup() {
+    echo "Cleaning up nockchain instance $i..."
+    
+    # Get all child processes
+    local children=\$(pgrep -P \$MAIN_PID 2>/dev/null || echo "")
+    local grandchildren=""
+    
+    # For each child, get its children too
+    for child in \$children; do
+        local child_procs=\$(pgrep -P \$child 2>/dev/null || echo "")
+        if [ -n "\$child_procs" ]; then
+            grandchildren="\$grandchildren \$child_procs"
+        fi
+    done
+    
+    # Combine all processes
+    local all_procs="\$children \$grandchildren"
+    
+    # Try graceful termination first
+    if [ -n "\$all_procs" ]; then
+        echo "Sending SIGTERM to child processes: \$all_procs"
+        kill -15 \$all_procs 2>/dev/null || true
+        sleep 2
+        
+        # Check if any processes still running
+        local still_running=""
+        for pid in \$all_procs; do
+            if kill -0 \$pid 2>/dev/null; then
+                still_running="\$still_running \$pid"
+            fi
+        done
+        
+        # If still running, force kill
+        if [ -n "\$still_running" ]; then
+            echo "Forcing termination of processes: \$still_running"
+            kill -9 \$still_running 2>/dev/null || true
+        fi
+    fi
+    
+    # Also look for any processes with our specific binary name
+    local binary_procs=\$(pgrep -f "$binary_name" || echo "")
+    if [ -n "\$binary_procs" ]; then
+        echo "Terminating $binary_name processes: \$binary_procs"
+        kill -15 \$binary_procs 2>/dev/null || true
+        sleep 1
+        kill -9 \$binary_procs 2>/dev/null || true
+    fi
+    
+    # Clean up PID file
+    rm -f "$instance_dir/.nock_${i}_pid"
+    
+    echo "Cleanup completed."
+}
+
+# Cleanup when any signal is received
+trap cleanup EXIT SIGINT SIGTERM
+
+# Set environment variables
+$env_vars
+
+# Change to instance directory
+cd "$instance_dir" 
+
+# Clean up any previous data
+rm -rf ./.data.nockchain .socket/nockchain_npc.sock
+
+# Start the nockchain process
+exec ./$binary_name --mining-pubkey $MINING_PUBKEY --mine --peer /ip4/95.216.102.60/udp/3006/quic-v1 --peer /ip4/65.108.123.225/udp/3006/quic-v1 --peer /ip4/65.109.156.108/udp/3006/quic-v1 --peer /ip4/65.21.67.175/udp/3006/quic-v1 --peer /ip4/65.109.156.172/udp/3006/quic-v1 --peer /ip4/34.174.22.166/udp/3006/quic-v1 --peer /ip4/34.95.155.151/udp/30000/quic-v1 --peer /ip4/34.18.98.38/udp/30000/quic-v1 --peer /ip4/96.230.252.205/udp/3006/quic-v1 --peer /ip4/94.205.40.29/udp/3006/quic-v1 --peer /ip4/159.112.204.186/udp/3006/quic-v1 --peer /ip4/217.14.223.78/udp/3006/quic-v1
+EOF
+
+        chmod +x "$instance_dir/start_nockchain.sh"
+        
+        # Start the screen session with the wrapper script
+        screen -dmS "$screen_name" $shell -c "$instance_dir/start_nockchain.sh; exec $shell"
+        
+        print_colored "$GREEN" "✅ Started nockchain instance $i in screen session '$screen_name'"
     done
     
     echo ""
-    echo "✅ All nockchain instances are now running"
+    print_colored "$GREEN" "✅ All nockchain instances are now running"
     echo ""
-    echo "💡 SCREEN SESSION COMMANDS:"
-    echo "   To list all sessions:       screen -ls"
-    echo "   To attach to a session:     screen -r nock-<id>"
-    echo "   To detach from a session:   Press Ctrl+A, then D"
-    echo "   To stop a miner instance:   screen -S nock-<id> -X quit"
+    print_colored "$CYAN" "💡 SCREEN SESSION COMMANDS:"
+    print_colored "$CYAN" "   To list all sessions:       screen -ls"
+    print_colored "$CYAN" "   To attach to a session:     screen -r nock-<id>"
+    print_colored "$CYAN" "   To detach from a session:   Press Ctrl+A, then D"
+    print_colored "$CYAN" "   To stop a miner instance:   screen -S nock-<id> -X quit"
     
     return 0
 }
@@ -1356,9 +1732,15 @@ main() {
         list)
             list_screen_sessions
             ;;
+        cleanup)
+            echo "╔═════════════════════════════════════════════════════════════════╗"
+            echo "║                   CLEANING UP ZOMBIE PROCESSES                  ║"
+            echo "╚═════════════════════════════════════════════════════════════════╝"
+            cleanup_all_zombies
+            ;;
         del)
             if [ -z "$arg2" ]; then
-                echo "❌ Please specify an instance ID or 'all'"
+                print_colored "$RED" "❌ Please specify an instance ID or 'all'"
                 display_help
                 exit 1
             fi
@@ -1375,7 +1757,7 @@ main() {
             display_help
             ;;
         *)
-            echo "❌ Unknown command: $command"
+            print_colored "$RED" "❌ Unknown command: $command"
             display_help
             exit 1
             ;;
